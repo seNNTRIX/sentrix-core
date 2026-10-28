@@ -59,7 +59,7 @@
 | ID | 상태 | Method · 경로(설계안) | 하는 일 / 완료 조건 | 선행 작업 |
 |---|---|---|---|---|
 | API-14 | [x] 완료 | `GET /api/v1/environments/{id}/collection-status?service=frontend` | 서비스별 대표 지표·로그·trace 최신성, 미관측·미설정·부분 응답·실패 구분 | BE-06, CollectionStatusApiTests |
-| API-15 | [ ] 대기 | `GET /api/v1/environments/{id}/service-map` | 관측된 서비스 간 호출 관계와 연결별 지표 반환 | BE-07 |
+| API-15 | [ ] 진행 | `GET /api/v1/environments/{id}/service-map` | 관측된 서비스 간 호출 관계와 연결별 지표 반환 | BE-07 |
 | API-16 | [ ] 대기 | `GET /api/v1/environments/{id}/services/{service}/pods` | 서비스 소속 Pod·준비 상태·재시작 횟수 반환 | 소유 관계 및 수집 지표 확인 |
 | API-17 | [ ] 대기 | `GET /api/v1/environments/{id}/services/{service}/pods/{pod}/metrics` | 해당 서비스에 속한 Pod의 CPU·메모리 시계열 반환 | API-16, 소속 검증 |
 | API-18 | [ ] 대기 | `GET /api/v1/environments/{id}/logs/volume` | 전체 대상 로그의 시간별 건수 집계 반환 | Loki 집계 쿼리·분류 기준 확정 |
@@ -102,7 +102,7 @@
 | BE-04 | [x] 완료 | 자동 테스트·CI 구성 | API 테스트와 PromQL 검사, MySQL 테스트 CI 정의 | 기존 30개 테스트 기록; 원격 CI 최신 성공 여부는 별도 |
 | BE-05 | [x] 완료 | 로컬 관측 환경·대시보드 연동 | 실제 메트릭·로그·트레이스 조회를 기존 화면에서 확인 | dev/observability, DEVELOPMENT.md; 짧은 기능 검증 범위 |
 | BE-06 | [x] 완료 | 수집 데이터 최신성 판정(1차) | 최근 30분의 대표 신호 시각과 180초 기준 최신성 반환; 무트래픽·미계측·수집 중단의 원인은 미확정으로 명시 | API-14, ISS-04; 전체 수집 품질은 후속 |
-| BE-07 | [ ] 대기 | 서비스 식별·호출 관계 구성 | Deployment와 trace service 이름 매핑, 관측 도구 구분, 미수집 관계 처리 | API-15, ISS-06 |
+| BE-07 | [ ] 진행 | 서비스 식별·호출 관계 구성 | Deployment와 trace service 이름 매핑, 관측 도구 구분, 미수집 관계 처리 | API-15, ISS-06 |
 | BE-08 | [ ] 대기 | Java ↔ Python 분석 계약 확정 | 요청·응답 스키마, 작업 ID, 모델/feature 버전, 시각·단위·누락값·실패 코드 합의 | 팀원과 합의 필요; 내부 경로도 이때 확정 |
 | BE-09 | [ ] 대기 | 주기 분석 실행부 | 환경별 시작·중지, 중복 실행 방지, 처리 지연 시 밀린 작업 정책, 최근 실행 상태 기록 | API-20/21; 화면 요청과 독립 실행 |
 | BE-10 | [ ] 대기 | 분석용 시간 구간 데이터 준비 | 수집 지연을 고려한 구간 정렬, 중복·누락 처리, 학습과 동일한 feature 입력 보장 | Python과 역할 분담; 화면 검색 상한 재사용 금지 |
@@ -152,7 +152,7 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 새 문제의 상세 기록 양식:
 
 ```md
-### ISS-11 — 문제 제목
+### ISS-12 — 문제 제목
 - 발견일 / 해결일:
 - 상태: 조사 중 / 조치 중 / 관찰 중 / 해결 / 보류
 - 관련 작업 ID:
@@ -233,3 +233,11 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 - [ ] 미연결 모델·미판정 상태·미실행 검증·남은 한계를 실제로 완료된 것처럼 표시하지 않았다.
 
 이 체크리스트는 작업마다 적용하는 기준이다. 문서 전체의 완료 표시로 사용하지 않는다.
+
+### 2026-10-28 — 요청 단위 서비스 맵 1차 구현 (검증 일부 남음)
+
+- API-15/BE-07 진행 중. GET service-map에 필수 traceId를 받아 CLIENT → SERVER 직접 연결과 서버 처리 시간/명시적 ERROR/UNSET 수를 반환한다. 전체 트래픽 집계·Deployment 매핑·업무 서비스 분류는 미구현이다.
+- Java 21 전체 42개 테스트 및 빌드 통과. Swagger에서 새 경로와 설명 표시 확인. MySQL 기반 서버 실행 유지. 실제 Tempo 성공 응답과 프론트 연결은 미검증이다.
+- ISS-11: 클러스터 재기동 실패. 컨테이너는 Up이지만 k3s가 `failed to find interface with specified node ip`로 종료되어 API 서버 연결 불가. MySQL은 healthy. 기존 볼륨·데이터는 삭제하지 않았다. 정확한 IP 갱신 경로와 k3d 복구는 다음 작업이다. API를 완료로 표시하지 않는다.
+- 구현 22c9d59, 테스트 1668d24를 별도 로컬 커밋. 문서 커밋 후 작업 커밋을 한 번에 푸시하고 원격 일치를 확인한다. 원격 CI·장시간 부하 검증 미실행.
+- 다음: 기존 클러스터 IP 복구 → 실제 trace 성공 검증 → 기간 단위 호출 관계 수집/집계 설계.

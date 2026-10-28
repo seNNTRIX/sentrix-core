@@ -64,7 +64,7 @@ MySQL 데이터는 Compose의 `mysql-data` 볼륨에 남습니다. `docker compo
 3. 해당 ID로 서비스 목록·메트릭·로그·요청 추적 API를 호출합니다. 시간 조회에는 저장소에 데이터가 있는 최근 UTC 시각을 사용합니다.
 4. **Server response**가 실제 호출 결과입니다. 문서의 **Example Value**는 응답 형식 예시이며 실제 관측값이 아닙니다. POST/PUT의 Execute는 실제 설정을 저장하거나 연결 검사를 실행합니다.
 
-현재 구현한 14개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
+현재 구현한 15개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
 
 Spring Boot 4용 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 사용합니다. 참고: [공식 시작 문서](https://springdoc.org/#getting-started), [호환성 안내](https://springdoc.org/faq.html).
 
@@ -386,3 +386,13 @@ Loki는 namespace와 Deployment를 고정하고 최신 로그 한 건의 이벤�
 저장소 실패·미설정은 **HTTP 200의 해당 signal**에 담고 다른 저장소 결과는 유지한다. 환경 없음은 404, 잘못된 서비스/누락 입력은 400, 조회 작업 중단은 503이다. 기존 URL 허용 목록, 리다이렉트 금지, 4MiB 응답 상한을 적용한다. 한 요청은 Prometheus 1회, Loki 1회, Tempo 1회를 순차 조회하므로 최대 각 source timeout의 합계(30초)만큼 걸릴 수 있다. 자동 반복 감시·DB 이력 저장·프론트 카드 추가는 이번 범위가 아니다.
 
 공식 근거: [Prometheus timestamp 함수](https://prometheus.io/docs/prometheus/latest/querying/functions/#timestamp), [Tempo 최신 검색 힌트](https://grafana.com/docs/tempo/latest/traceql/construct-traceql-queries/#retrieve-most-recent-results-experimental). 현재 로컬 Tempo 2.9.0에서 실제 응답 지원을 확인했다.
+
+## 요청 단위 서비스 맵 (1차)
+
+`GET /api/v1/environments/{id}/service-map?traceId={32자리 소문자 hex}`
+
+기존 trace 상세 검증과 환경 필터를 재사용한다. 반환 scope는 SINGLE_TRACE다. nodes는 해당 trace의 service.name이며 Deployment나 업무 서비스로 자동 분류하지 않는다. edges는 직접 연결된 CLIENT 부모 → SERVER 자식만 포함한다. 부모 누락·미계측·비동기 관계를 추측하지 않는다.
+
+각 edge의 observedCalls는 이 trace에서 관측한 연결 수, explicitErrorCount는 SERVER의 명시적 ERROR 수, unsetStatusCount는 판정되지 않은 상태 수다. meanServerDurationMs/maxServerDurationMs는 SERVER span 시간이다. 전체 트래픽의 호출량·오류율·네트워크 왕복 시간이 아니다. 연결이 없으면 NO_OBSERVED_EDGES, 있으면 범위가 제한되어 PARTIAL을 반환한다. 기존 trace 경고도 보존한다.
+
+입력 400, 환경/trace 없음 404, Tempo 미설정 409, 저장소 실패 502/504, 중단 503은 기존 상세 조회 계약과 같다. 실제 환경 조회 성공 검증은 클러스터 복구 후 필요하다. 전체 기간 서비스 맵과 Deployment 매핑은 후속이다.
