@@ -1,5 +1,10 @@
 package com.sentrix.core.datasource;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 import com.sentrix.core.environment.EnvironmentRepository;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
@@ -12,6 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+@Tag(name="02. 데이터 소스")
 @RestController
 @RequestMapping("/api/v1/environments/{environmentId}/data-sources")
 class DataSourceController {
@@ -28,6 +34,7 @@ class DataSourceController {
         this.probe = probe;
     }
 
+    @Operation(summary="데이터 소스 설정 조회", description="종류별 접속 설정과 마지막 연결 검사 결과입니다. 지속적인 수집 상태를 뜻하지 않습니다.")
     @GetMapping
     List<DataSourceResponse> list(@PathVariable Long environmentId) {
         requireEnvironment(environmentId);
@@ -35,8 +42,9 @@ class DataSourceController {
                 .map(DataSourceResponse::from).toList();
     }
 
+    @Operation(summary="데이터 소스 설정 저장", description="name(1~100자), baseUrl(최대 2048자), timeoutSeconds(정수 1~10)를 입력합니다. 서버 허용 목록의 주소만 저장합니다. 저장만으로 연결 검사를 실행하지 않습니다.")
     @PutMapping("/{type}")
-    DataSourceResponse configure(@PathVariable Long environmentId, @PathVariable String type,
+    DataSourceResponse configure(@PathVariable Long environmentId, @Parameter(schema=@Schema(allowableValues={"prometheus","loki","tempo"})) @PathVariable String type,
                                  @Valid @RequestBody ConfigureDataSource request) {
         var sourceType = DataSourceType.parse(type);
         requireEnvironment(environmentId);
@@ -47,8 +55,9 @@ class DataSourceController {
         return persist(source);
     }
 
+    @Operation(summary="데이터 소스 연결 테스트", description="저장된 주소의 readiness를 확인합니다. 연결 실패도 검사가 끝났으면 HTTP 200과 status=FAILED로 반환합니다. CONNECTED는 데이터 수집 정상 판정이 아닙니다.")
     @PostMapping("/{type}/test")
-    DataSourceResponse test(@PathVariable Long environmentId, @PathVariable String type) {
+    DataSourceResponse test(@PathVariable Long environmentId, @Parameter(schema=@Schema(allowableValues={"prometheus","loki","tempo"})) @PathVariable String type) {
         var sourceType = DataSourceType.parse(type);
         requireEnvironment(environmentId);
         var source = sources.findByEnvironmentIdAndType(environmentId, sourceType)

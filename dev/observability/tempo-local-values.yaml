@@ -1,0 +1,29 @@
+# Short, low-traffic UI demo only; not the dataset collection profile.
+tempo:
+  reportingEnabled: false
+  retention: 30m
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 768Mi
+  extraEnv:
+    - name: GOMEMLIMIT
+      value: 600MiB
+  ingester:
+    max_block_duration: 5m
+    max_block_bytes: 10000000
+  querier:
+    max_concurrent_queries: 2
+  queryFrontend:
+    search:
+      concurrent_jobs: 2
+  storage:
+    trace:
+      block:
+        parquet_row_group_size_bytes: 10000000
+persistence:
+  enabled: true
+  size: 2Gi

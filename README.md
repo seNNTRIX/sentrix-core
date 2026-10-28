@@ -1,6 +1,8 @@
 # sentrix-core
 
-SentriX의 Java 21 / Spring Boot 4.1.2 백엔드. 서비스 메타데이터와 진단 결과는 MySQL 8.4에 저장합니다.
+**개발 진행·완료 체크·문제 해결 기록:** [백엔드 작업 현황표](docs/BACKEND-TRACKER.md). 개발할 때 관련 작업 상태와 검증 결과를 함께 갱신합니다. 과거 상세 이력은 [DEVELOPMENT.md](docs/DEVELOPMENT.md)에 보존합니다.
+
+SentriX의 Java 21 / Spring Boot 4.1.2 백엔드. 환경·데이터 소스 설정은 MySQL 8.4에 저장합니다. ML 진단 결과 저장은 후속 개발 대상입니다.
 
 목표 흐름:
 
@@ -16,11 +18,12 @@ Prometheus / Tempo / Loki -> query -> window -> Python features/model-server
 - MySQL 연결, Flyway 테이블 마이그레이션, JPA 스키마 검증
 - 관측 환경 메타데이터 등록·목록·상세 API
 - 환경별 Prometheus·Tempo·Loki 접속 설정 저장·조회 및 HTTP 연결 테스트
-- Prometheus의 Deployment 목록·서비스별 메트릭 시계열 조회
+- Prometheus의 Deployment 목록·서비스별 메트릭 시계열·준비 상태 조회
+- Loki 로그 검색, Tempo 트레이스 검색·상세 조회 및 대시보드 연결
 - 애플리케이션 및 DB 연결 상태 확인
 - API 통합 테스트 및 MySQL 8.4 CI 설정
 
-환경 등록은 이름과 Kubernetes namespace를 저장합니다. 등록만으로 수집기가 설치되거나 관측 연결이 완료되지는 않습니다. 메트릭 조회는 아래의 수집 지표 계약을 사용합니다. 트레이스·로그 원본 조회, topology, 모델 호출, 진단 저장, 사용자 인증, dashboard 연결은 아직 구현 전입니다.
+환경 등록은 이름과 Kubernetes namespace를 저장합니다. 등록만으로 수집기가 설치되거나 관측 연결이 완료되지는 않습니다. 메트릭 조회는 아래의 수집 지표 계약을 사용합니다. 메트릭·준비 상태·로그·트레이스 조회와 dashboard 연결을 구현했습니다. topology, 모델 호출, 진단 저장, 사용자 인증은 아직 구현 전입니다.
 
 ## 로컬 실행
 
@@ -52,6 +55,21 @@ MySQL 데이터는 Compose의 `mysql-data` 볼륨에 남습니다. `docker compo
 
 ## API 확인
 
+### Swagger에서 직접 호출
+
+서버 실행 후 [Swagger UI](http://127.0.0.1:8080/swagger-ui/index.html)를 엽니다. OpenAPI JSON은 [문서 주소](http://127.0.0.1:8080/v3/api-docs)에서 확인합니다.
+
+1. `00. 서버 상태` → `GET /actuator/health` → **Try it out** → **Execute**를 눌러 `UP`을 확인합니다.
+2. `01. 관측 환경` → `GET /api/v1/environments`를 실행해 실제 환경 ID를 확인합니다.
+3. 해당 ID로 서비스 목록·메트릭·로그·요청 추적 API를 호출합니다. 시간 조회에는 저장소에 데이터가 있는 최근 UTC 시각을 사용합니다.
+4. **Server response**가 실제 호출 결과입니다. 문서의 **Example Value**는 응답 형식 예시이며 실제 관측값이 아닙니다. POST/PUT의 Execute는 실제 설정을 저장하거나 연결 검사를 실행합니다.
+
+현재 구현한 13개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
+
+Spring Boot 4용 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 사용합니다. 참고: [공식 시작 문서](https://springdoc.org/#getting-started), [호환성 안내](https://springdoc.org/faq.html).
+
+### 구현 API 목록
+
 | Method | Path | 설명 |
 | --- | --- | --- |
 | GET | `/actuator/health` | 서버 및 DB 연결 상태, 정상 시 `UP` |
@@ -62,6 +80,10 @@ MySQL 데이터는 Compose의 `mysql-data` 볼륨에 남습니다. `docker compo
 | PUT | `/api/v1/environments/{id}/data-sources/{type}` | 종류별 설정 생성·변경 |
 | POST | `/api/v1/environments/{id}/data-sources/{type}/test` | 저장된 주소로 실제 readiness 요청 후 결과 저장 |
 | GET | `/api/v1/environments/{id}/services` | 등록 namespace에서 관측되는 Deployment 목록 |
+| GET | `/api/v1/environments/{id}/services/{service}/status` | 최근 Deployment 인스턴스 수·준비 상태 |
+| GET | `/api/v1/environments/{id}/logs` | 서비스·기간·문자열별 Loki 로그 검색 |
+| GET | `/api/v1/environments/{id}/traces` | 서비스·기간별 Tempo 요청 추적 검색 |
+| GET | `/api/v1/environments/{id}/traces/{traceId}` | 환경 내 처리 구간·부모 관계·소요 시간 |
 | GET | `/api/v1/environments/{id}/metrics` | 서비스·지표·기간별 시계열 조회 |
 
 ```sh
@@ -172,7 +194,7 @@ curl -G http://127.0.0.1:8080/api/v1/environments/1/metrics \
 
 서비스 목록 응답은 `environmentId`, `namespace`, `queriedAt`, `dataStatus`, `warnings`, `items`입니다. 각 항목은 `{name, kind: "Deployment", createdAt}`이며 이름순입니다. `createdAt`은 Kubernetes Deployment 생성 시각이고, `queriedAt`은 조회 평가 시각입니다. 마지막 수집 시각이나 정상 여부로 사용하지 않습니다.
 
-**현재 서비스 식별 단위는 Kubernetes Deployment입니다.** `kube_deployment_created`에서 실제 목록을 조회하며 11개 서비스 이름을 하드코딩하지 않습니다. 같은 namespace의 관측 도구·loadgenerator Deployment도 포함될 수 있습니다. StatefulSet·DaemonSet, Kubernetes Service 객체 목록, readiness/Pod 수, trace 계측 여부는 아직 반환하지 않습니다. 최대 500개이며 초과 시 오류를 반환합니다.
+**현재 서비스 식별 단위는 Kubernetes Deployment입니다.** `kube_deployment_created`에서 실제 목록을 조회하며 11개 서비스 이름을 하드코딩하지 않습니다. 같은 namespace의 관측 도구·loadgenerator Deployment도 포함될 수 있습니다. StatefulSet·DaemonSet, Kubernetes Service 객체 목록, trace 계측 여부는 반환하지 않습니다. 준비 상태와 인스턴스 수는 별도 `/services/{service}/status`에서 조회합니다. 최대 500개이며 초과 시 오류를 반환합니다.
 
 | `metric` | 단위 | 계산 |
 | --- | --- | --- |
@@ -214,6 +236,27 @@ curl -G http://127.0.0.1:8080/api/v1/environments/1/metrics \
 - Prometheus 경고/정보 메시지는 `UPSTREAM_WARNING`으로 표시합니다. 서버의 원문 메시지·쿼리·내부 상세를 노출하지 않습니다.
 
 `AVAILABLE`은 서비스 정상 또는 수집 최신성을 뜻하지 않습니다. Prometheus의 lookback 안에 남은 이전 샘플도 평가에 사용될 수 있습니다. 모든 Pod의 수집 완전성도 이 상태로 보장하지 않습니다. 신규 수집/중단과 실제 0 트래픽을 확정하려면 이후 수집 상태 기능이 필요합니다.
+
+### 서비스 준비 상태
+
+```sh
+curl http://127.0.0.1:8080/api/v1/environments/1/services/frontend/status
+```
+
+`environmentId`, `namespace`, `service`, `queriedAt`, `observedAt`, `maxAgeSeconds=60`, `status`, `desiredReplicas`, `replicas`, `readyReplicas`, `availableReplicas`, `warnings`를 반환합니다. 상태를 MySQL에 복사하지 않고 등록된 Prometheus에서 조회합니다.
+
+- `desiredReplicas`: 목표 Pod 수. `replicas`: Kubernetes가 집계한 현재 Pod 수이며 프로세스가 정상 실행 중이라는 보장은 아닙니다.
+- `readyReplicas`: 준비된 Pod 수. `availableReplicas`: Kubernetes의 최소 준비 유지 시간 조건까지 만족한 가용 Pod 수.
+- `READY`: 목표가 1 이상이고 준비·가용 수가 모두 목표 이상. 추가 Pod가 생기는 롤링 배포도 허용합니다.
+- `SCALED_DOWN`: 목표와 현재 수가 모두 0. 0이라는 이유만으로 장애로 분류하지 않습니다.
+- `NOT_READY`: 유효한 집계는 있지만 위 두 조건에 해당하지 않음. 시작·축소·배포 중일 수 있으므로 장애 확정이 아닙니다.
+- `UNKNOWN`: 필요한 지표 누락, 60초 초과, 중복 수집 값의 불일치, 수 간 모순, upstream 경고.
+
+4종 kube-state-metrics 지표의 min/max를 비교해 중복 수집을 합산하지 않습니다. 모든 원본 시각 중 가장 오래된 시각을 `observedAt`으로 반환합니다. `timestamp(원본 지표)`를 사용하므로 쿼리 평가 시각을 마지막 수집 시각으로 오해하지 않습니다. 오래됐거나 누락·충돌한 필드는 `null`이며 실제 0은 보존합니다. 네 지표가 있어도 `가용 > 준비` 또는 `준비 > 현재`이면 `UNKNOWN`입니다.
+
+경고 코드는 `MISSING_METRICS`, `STALE_METRICS`, `INCONSISTENT_METRICS`, `UPSTREAM_WARNING`입니다. 미관측·삭제된 서비스는 지표가 없으므로 `UNKNOWN`이지 존재하지 않는다는 확정 404가 아닙니다. 없는 환경은 404, 연결 미설정은 409, upstream 실패는 502/504로 기존 조회 API와 같습니다. 잘못된 개수·응답은 502입니다.
+
+**이 상태는 최근 수집된 Kubernetes 준비 상태이며, 요청 성공·최신 배포 완료·RCA를 보장하지 않습니다.** 수집 간격은 60초보다 충분히 짧아야 합니다. 현재 로컬 구성은 5초입니다. `observedAt`은 Prometheus가 관측한 원본 샘플 시각이며 kube-state-metrics 내부 캐시나 Kubernetes 제어부의 지연까지 검증하지는 않습니다.
 
 ### 지표·서비스 연결 계약
 
@@ -273,3 +316,36 @@ CI에서도 같은 검증을 실행합니다. 여러 Pod와 중복 scrape, 다�
 기술 결정: [docs/decisions/001-java-mysql.md](docs/decisions/001-java-mysql.md)
 
 프로젝트 연구 정의는 `sentrix-collection`의 프로젝트 문서와 함께 확인합니다. 모델 입력/출력 schema는 학습 측과 확정 후 구현합니다.
+
+
+## 서비스 로그 조회
+
+`GET /api/v1/environments/{id}/logs?service=frontend&from=2026-10-28T09:00:00Z&to=2026-10-28T09:15:00Z&search=error&limit=100`
+
+- 환경에 저장된 Loki와 서버 허용 URL 목록을 사용한다. namespace는 환경 정보로 결정하며 입력으로 받지 않는다.
+- 필수: `service`, `from`, `to`. from 포함·to 제외, 최대 24시간. `search`는 최대 200자, 제어문자 금지, 대소문자를 구분하는 원문 포함 검색이다. 임의 LogQL은 허용하지 않는다.
+- `limit` 기본 100, 범위 1~500. limit+1건을 조회해 초과 여부를 판단하고 `truncated=true`, `LIMIT_REACHED`를 표시한다. 전체 건수나 페이지 이동을 보장하지 않는다.
+- 응답: 환경·서비스·조회 조건, `queriedAt`, `dataStatus`, `warnings`, `truncated`, `items`. 각 item은 `timestamp`, 나노초 문자열 `timestampNanos`, `pod`, `container`, 원문 `message`다. 여러 stream을 합쳐 최신순 정렬하며 중복 메시지를 임의로 제거하지 않는다.
+- 수집 계약: `k8s_namespace_name`, `k8s_deployment_name` 인덱스 라벨. Pod·컨테이너는 라벨 또는 structured metadata에서 읽는다. 다른 namespace/서비스의 응답은 거부한다.
+- `NO_DATA`는 조건에 맞는 로그가 없다는 의미다. 수집 정상·서비스 정상으로 해석하지 않는다. 저장소 오류를 빈 결과로 바꾸지 않는다.
+- 409 `LOKI_NOT_CONFIGURED`/`TARGET_NOT_ALLOWED`, 502 `LOKI_HTTP_ERROR`/`LOKI_QUERY_FAILED`/`LOKI_UNAVAILABLE`/`INVALID_LOKI_RESPONSE`/`RESPONSE_TOO_LARGE`, 504 `LOKI_TIMEOUT`. 없는 환경은 404, 잘못된 조건은 400.
+- Prometheus/Loki는 같은 4MiB 응답 상한·전체 본문 timeout·리다이렉트 금지 구현을 사용한다. 로그는 MySQL에 복사하지 않는다.
+
+로컬 실행: [dev/observability/README.md](dev/observability/README.md). 이 API는 화면 검색용이며, 전체 window를 사용해야 하는 ML feature 수집 API가 아니다.
+
+
+## 요청 추적 조회 (Tempo)
+
+```http
+GET /api/v1/environments/1/traces?service=checkoutservice&from=2026-10-28T10:00:00Z&to=2026-10-28T10:15:00Z&limit=20
+GET /api/v1/environments/1/traces/11111111111111111111111111111111
+```
+
+- TEMPO 소스 등록 필요. `from/to`는 초 단위 UTC, 최대 24시간, `limit`은 1~100(기본 20). 검색은 TraceQL의 `resource.service.namespace`와 `resource.service.name`을 같은 span에서 정확히 일치시킨다. 이름을 요청 경로·쿼리에 직접 삽입하지 않는다.
+- 검색 결과 `items`: `traceId`, `startedAt`, `durationMs`, `rootService`, `rootOperation`. 시작 서비스/작업명과 시간폭은 Tempo의 trace 전체 메타데이터이며 선택한 서비스의 처리 시간만을 뜻하지 않는다. Tempo가 먼저 찾은 N건을 반환하므로 정렬은 반환된 집합 안에서만 보장한다. `limitReached=true`는 상한 도달이며 전체 건수나 다음 페이지 존재를 확정하지 않는다. 빈 결과는 `NO_DATA`.
+- 상세 `spans`: `spanId`, `parentSpanId`, `service`, `operation`, `kind`, `status`, `startedAt`, `endedAt`, `durationMs`. trace ID는 0이 아닌 32자리 소문자 hex. Tempo의 base64/hex ID를 표준 hex로 변환한다. 시각은 나노초를 보존한다.
+- 상세는 환경의 `service.namespace`와 일치하는 span만 반환한다. 다른 환경/namespace 누락 span은 제외하고 경고한다. 보이는 span에 부모가 없으면 `MISSING_PARENT_SPANS`, Tempo 부분 응답이면 `UPSTREAM_PARTIAL`. `AVAILABLE`도 계측되지 않은 구간이 없다는 보장은 아니다. 상태 `UNSET`은 정상 확정이 아니다.
+- 상세 `durationMs`는 **해당 환경에서 보이는 구간의 처음~끝 시간폭**이다. 중첩·병렬 구간 시간을 합산하지 않는다. 느리거나 오류인 span이 실제 장애 원인이라고 판정하지 않는다.
+- 저장소 응답 4MiB, 상세 5,000 span 제한. 과대·손상 응답, ID 불일치, 중복 ID, 부모 순환을 거부한다. 미수집/만료/다른 환경의 trace는 `404 TRACE_NOT_FOUND`; 저장소 장애는 502/504, 미설정은 409. 임의 URL·리다이렉트는 기존 허용 목록 정책으로 차단한다.
+- 원본은 Tempo에 보관하고 MySQL에 복제하지 않는다. 이 제한된 화면 조회 API는 ML 학습/전체 window 수집 용도가 아니다. 운영 환경의 사용자 인증·tenant 격리는 별도 작업이다.
+- 로컬 설치: [dev/observability/README.md](dev/observability/README.md). API 형식 참고: [Tempo HTTP API](https://grafana.com/docs/tempo/latest/api_docs/). 테스트 대상 chart 1.24.4의 v2 trace 응답을 사용한다.

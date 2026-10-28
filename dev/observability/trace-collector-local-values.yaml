@@ -1,0 +1,13 @@
+# Apply after sentrix-collection/deploy/local-demo/otel-values.yaml.
+alternateConfig:
+  exporters:
+    otlp/tempo:
+      endpoint: tempo.sentrix.svc.cluster.local:4317
+      tls:
+        insecure: true
+      sending_queue:
+        queue_size: 100
+  service:
+    pipelines:
+      traces:
+        exporters: [span_metrics, otlp/tempo]

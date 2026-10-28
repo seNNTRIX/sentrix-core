@@ -1,0 +1,3 @@
+# Apply after sentrix-collection/deploy/loki/values-minimal.yaml.
+resultsCache:
+  enabled: false

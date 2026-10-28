@@ -76,6 +76,31 @@ class PromqlTests {
         yaml.append(check(MetricDefinition.error_ratio, "idle", "{service_name=\"idle\"}", ".nan"));
         yaml.append(check(MetricDefinition.request_rate, "missing", null, null));
         yaml.append(check(MetricDefinition.cpu_usage_cores, "missing", null, null));
+        // Raw samples stopped at t=0. Instant query evaluation at t=120 must not
+        // turn those samples into fresh data. Duplicate scrapes must not add Pods.
+        yaml.append("  - interval: 30s\n    input_series:\n");
+        String[] replicaMetrics = {"spec_replicas", "status_replicas", "status_replicas_ready", "status_replicas_available"};
+        String[] fields = {"desiredReplicas", "replicas", "readyReplicas", "availableReplicas"};
+        for (String name : replicaMetrics) {
+            for (String job : new String[]{"a", "duplicate"}) {
+                yaml.append("      - series: 'kube_deployment_").append(name)
+                        .append("{namespace=\"sentrix\",deployment=\"frontend\",job=\"").append(job)
+                        .append("\"}'\n        values: '2'\n");
+            }
+            yaml.append("      - series: 'kube_deployment_").append(name)
+                    .append("{namespace=\"other\",deployment=\"frontend\"}'\n        values: '99'\n");
+            yaml.append("      - series: 'kube_deployment_").append(name)
+                    .append("{namespace=\"sentrix\",deployment=\"frontend-v2\"}'\n        values: '99'\n");
+        }
+        yaml.append("    promql_expr_test:\n      - expr: '")
+                .append(DeploymentStatusController.expression("sentrix", "frontend"))
+                .append("'\n        eval_time: 2m\n        exp_samples:\n");
+        for (String field : fields) {
+            for (String stat : new String[]{"min", "max", "observedAt"}) {
+                yaml.append("          - labels: '{field=\"").append(field).append("\",stat=\"").append(stat)
+                        .append("\"}'\n            value: ").append(stat.equals("observedAt") ? 0 : 2).append("\n");
+            }
+        }
         Path target = Path.of("target", "prometheus-query-tests.yaml");
         Files.createDirectories(target.getParent());
         Files.writeString(target, yaml);
