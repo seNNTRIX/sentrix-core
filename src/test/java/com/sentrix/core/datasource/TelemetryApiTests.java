@@ -132,6 +132,70 @@ class TelemetryApiTests {
                 .andExpect(jsonPath("$.dataStatus").value("NO_DATA")).andExpect(jsonPath("$.items").isEmpty());
     }
 
+    static String deploymentStatus(int desired, int replicas, int ready, int available, long ageSeconds) {
+        String[] fields = {"desiredReplicas", "replicas", "readyReplicas", "availableReplicas"};
+        int[] counts = {desired, replicas, ready, available};
+        var rows = new ArrayList<String>();
+        for (int i = 0; i < fields.length; i++) {
+            for (String stat : List.of("min", "max", "observedAt")) {
+                double value = stat.equals("observedAt") ? System.currentTimeMillis() / 1000.0 - ageSeconds : counts[i];
+                rows.add("{\"metric\":{\"field\":\"" + fields[i] + "\",\"stat\":\"" + stat
+                        + "\"},\"value\":[1700000000,\"" + value + "\"]}");
+            }
+        }
+        return envelope("vector", "[" + String.join(",", rows) + "]");
+    }
+
+    @Test
+    void distinguishesReadinessFromScaledDownAndMissingObservation() throws Exception {
+        int[][] cases = {{2,2,2,2}, {2,2,1,1}, {0,0,0,0}, {0,1,1,1}, {1,2,2,2}};
+        String[] statuses = {"READY", "NOT_READY", "SCALED_DOWN", "NOT_READY", "READY"};
+        for (int i = 0; i < cases.length; i++) {
+            int[] c = cases[i]; payload.set(deploymentStatus(c[0],c[1],c[2],c[3],5));
+            mvc.perform(get(base + "/services/frontend/status")).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value(statuses[i]))
+                    .andExpect(jsonPath("$.desiredReplicas").value(c[0]))
+                    .andExpect(jsonPath("$.readyReplicas").value(c[2]))
+                    .andExpect(jsonPath("$.observedAt").isNotEmpty());
+        }
+        assertTrue(sentParameters().get("query").contains("namespace=\"other-ns\",deployment=\"frontend\""));
+        assertTrue(sentParameters().get("query").contains("timestamp(kube_deployment_spec_replicas{"));
+        payload.set(envelope("vector", "[]"));
+        mvc.perform(get(base + "/services/frontend/status")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNKNOWN"))
+                .andExpect(jsonPath("$.readyReplicas").isEmpty())
+                .andExpect(jsonPath("$.warnings[0]").value("MISSING_METRICS"));
+    }
+
+    @Test
+    void staleConflictingOrIncompleteStatusCannotClaimReady() throws Exception {
+        payload.set(deploymentStatus(1,1,1,1,120));
+        mvc.perform(get(base + "/services/frontend/status")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNKNOWN"))
+                .andExpect(jsonPath("$.readyReplicas").isEmpty())
+                .andExpect(jsonPath("$.warnings[0]").value("STALE_METRICS"));
+        // Independent exporters disagree on the same desired count.
+        payload.set(deploymentStatus(1,1,1,1,5).replace(
+                "\"field\":\"desiredReplicas\",\"stat\":\"max\"},\"value\":[1700000000,\"1.0\"]",
+                "\"field\":\"desiredReplicas\",\"stat\":\"max\"},\"value\":[1700000000,\"2.0\"]"));
+        mvc.perform(get(base + "/services/frontend/status")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNKNOWN"))
+                .andExpect(jsonPath("$.warnings[0]").value("INCONSISTENT_METRICS"));
+        payload.set(deploymentStatus(1,1,2,2,5));
+        mvc.perform(get(base + "/services/frontend/status")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNKNOWN"));
+        payload.set(deploymentStatus(1,1,1,1,5).replace("\"status\":\"success\"", "\"warnings\":[\"partial response\"],\"status\":\"success\""));
+        mvc.perform(get(base + "/services/frontend/status")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UNKNOWN"));
+        payload.set(deploymentStatus(-1,1,1,1,5));
+        mvc.perform(get(base + "/services/frontend/status")).andExpect(status().isBadGateway());
+        int before = requests.get();
+        mvc.perform(get(base + "/services/bad!/status")).andExpect(status().isBadRequest());
+        assertEquals(before, requests.get());
+        httpStatus.set(503);
+        mvc.perform(get(base + "/services/frontend/status")).andExpect(status().isBadGateway());
+    }
+
     @Test
     void preservesZeroAndMarksMissingOrNonFinitePointsInsteadOfInventingData() throws Exception {
         payload.set(envelope("matrix", series("deployment", "[[1700000000,\"0\"],[1700000060,\"NaN\"]]")));

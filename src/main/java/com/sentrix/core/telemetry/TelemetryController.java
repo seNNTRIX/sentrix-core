@@ -1,5 +1,10 @@
 package com.sentrix.core.telemetry;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 import com.sentrix.core.datasource.PrometheusClient;
 import java.math.BigDecimal;
 import java.time.*;
@@ -9,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import tools.jackson.databind.JsonNode;
 
+@Tag(name="03. 서비스와 메트릭")
 @RestController
 @RequestMapping("/api/v1/environments/{environmentId}")
 class TelemetryController {
@@ -17,6 +23,7 @@ class TelemetryController {
 
     TelemetryController(PrometheusClient prometheus) { this.prometheus = prometheus; }
 
+    @Operation(summary="서비스 목록 조회", description="현재 namespace의 Deployment 목록입니다. 관측 도구도 포함될 수 있으며 서비스 건강 상태나 trace 계측 여부를 보장하지 않습니다.")
     @GetMapping("/services")
     ServiceList services(@PathVariable Long environmentId) {
         var connection = prometheus.connection(environmentId);
@@ -39,9 +46,10 @@ class TelemetryController {
                 response.hasWarnings() ? List.of("UPSTREAM_WARNING") : List.of(), List.copyOf(services.values()));
     }
 
+    @Operation(summary="서비스 메트릭 시계열 조회", description="service, metric, from, to는 필수입니다. UTC ISO 8601 초 단위 시각, from 포함·to 제외, 최대 24시간입니다. stepSeconds는 5~3600(기본 30), 최대 1440개 지점입니다. 실제 0과 누락 null을 구분합니다. CPU는 cores, 메모리는 bytes, 오류율은 0~1 비율, 지연은 ms입니다. AVAILABLE은 서비스 정상 판정이 아닙니다.")
     @GetMapping("/metrics")
     MetricSeries metrics(@PathVariable Long environmentId, @RequestParam String service,
-                         @RequestParam String metric, @RequestParam Instant from, @RequestParam Instant to,
+                         @Parameter(schema=@Schema(allowableValues={"cpu_usage_cores","memory_working_set_bytes","request_rate","error_ratio","latency_p50_ms","latency_p90_ms","latency_p99_ms"})) @RequestParam String metric, @RequestParam Instant from, @RequestParam Instant to,
                          @RequestParam(defaultValue = "30") int stepSeconds) {
         if (!NAME.matcher(service).matches()) throw badRequest("Invalid service name");
         var definition = MetricDefinition.parse(metric);

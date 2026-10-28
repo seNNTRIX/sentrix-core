@@ -1,0 +1,16 @@
+# Apply after sentrix-collection/deploy/otel-collector/daemonset-values.yaml.
+image:
+  tag: 0.160.0
+config:
+  receivers:
+    filelog:
+      # Only the local demo namespace; never read another project's logs.
+      include: [/var/log/pods/sentrix_*/*/*.log]
+      exclude:
+        - /var/log/pods/sentrix_loki*/*/*.log
+        - /var/log/pods/sentrix_otel-*/*/*.log
+        - /var/log/pods/sentrix_prometheus-*/*/*.log
+  service:
+    pipelines:
+      logs:
+        exporters: [otlphttp/loki]
