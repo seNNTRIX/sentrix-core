@@ -7,8 +7,8 @@
 ## 1. 현재 어디까지 됐나
 
 - Java 21 / Spring Boot / MySQL 8.4 기반으로 환경·관측 저장소 설정을 저장한다.
-- Prometheus 메트릭·Deployment 준비 상태, Loki 로그, Tempo 트레이스를 조회하는 **18개 API operation을 구현**했다. 서비스 맵과 분석 실행 설정의 전체 범위는 아직 진행 중이다.
-- Swagger에서 구현된 18개 API operation을 한국어 설명과 함께 직접 호출할 수 있다(BE-16 완료).
+- Prometheus 메트릭·Deployment 준비 상태, Loki 로그, Tempo 트레이스를 조회하는 **19개 API operation을 구현**했다. 서비스 맵과 분석 실행 설정의 전체 범위는 아직 진행 중이다.
+- Swagger에서 구현된 19개 API operation을 한국어 설명과 함께 직접 호출할 수 있다(BE-16 완료).
 - 대시보드의 기존 디자인에 실제 조회 결과를 연결했다. 원본 관측 데이터는 MySQL에 복제하지 않는다.
 - 자동 이상 탐지, 장애 이력 저장, Python 모델 호출, RCA 결과 저장은 **아직 구현 전**이다. 현재 준비 상태 조회는 ML 장애 판정이 아니다.
 - 아래 완료 표시는 현재 로컬 코드와 기존 검증 기록 기준이다. 커밋·푸시·배포 완료를 뜻하지 않는다. 테스트 실행 여부와 범위는 아래 날짜별 작업 기록을 기준으로 확인한다.
@@ -61,7 +61,7 @@
 | API-14 | [x] 완료 | `GET /api/v1/environments/{id}/collection-status?service=frontend` | 서비스별 대표 지표·로그·trace 최신성, 미관측·미설정·부분 응답·실패 구분 | BE-06, CollectionStatusApiTests |
 | API-15 | [ ] 진행 | `GET /api/v1/environments/{id}/service-map` | 관측된 서비스 간 호출 관계와 연결별 지표 반환 | BE-07 |
 | API-16 | [x] 완료 | `GET /api/v1/environments/{id}/services/{service}/pods` | 서비스 소속 Pod·준비 상태·재시작 횟수 반환 | PodControllerTests, 실제 Prometheus 및 Swagger 200 확인 |
-| API-17 | [ ] 대기 | `GET /api/v1/environments/{id}/services/{service}/pods/{pod}/metrics` | 해당 서비스에 속한 Pod의 CPU·메모리 시계열 반환 | API-16, 소속 검증 |
+| API-17 | [x] 완료 | `GET /api/v1/environments/{id}/services/{service}/pods/{pod}/metrics` | 해당 서비스에 속한 Pod의 CPU·메모리 시계열 반환 | PodMetricsTests, 실제 Prometheus 격리 검증, Swagger CPU 시계열 |
 | API-18 | [ ] 대기 | `GET /api/v1/environments/{id}/logs/volume` | 전체 대상 로그의 시간별 건수 집계 반환 | Loki 집계 쿼리·분류 기준 확정 |
 | API-19 | [ ] 대기 | `GET /api/v1/environments/{id}/overview` | 화면 주요 지표·관측 상태·진행 중 장애 수 요약 반환 | 집계 시각·부분 실패 계약 확정 |
 | API-20 | [ ] 진행 | `GET /api/v1/environments/{id}/monitoring` | 분석 실행 상태·마지막 성공 시각·실패 이유 반환 | BE-09, BE-13 |
@@ -279,3 +279,13 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 - 사용자 요청으로 최신 origin/main에 feat/service-metrics-api를 일반 merge하여 기존 작성자·커밋 이력을 보존했다. 충돌 없음, 병합 직후 소스 트리는 검증된 작업 브랜치와 동일했다. PR 생성 없음.
 - Java 21 `./mvnw verify`: 전체 46개 테스트 통과, 실패·오류·건너뜀 0, BUILD SUCCESS. MySQL 전용 전체 테스트와 원격 CI는 이번 병합에서 실행하지 않았다.
 - main에 푸시 후 원격 HEAD 일치 여부를 확인한다. GitHub 잔디는 작성자 이메일의 계정 연결 및 GitHub 반영 시간에 따라 달라지며 계정 이메일 설정은 확인하지 않았다.
+
+### 2026-10-29 — Pod별 리소스 시계열
+
+- API-17 구현: Deployment 소속과 Pod UID를 각 과거 평가 시점에 검증하고 cAdvisor id 경로의 UID를 제한한다. 이름 재사용으로 다른 Pod 사용량이 합쳐지는 것을 방지한다. 기존 Pod 목록 소유 관계 쿼리를 공통 사용한다.
+- 입력은 24시간·1440지점으로 제한, 메트릭 2종만 허용. 잘못된 응답 namespace/Pod/UID·음수·중복·범위 밖 시각을 거부한다. 결측은 null, NaN/Inf는 경고와 null로 반환한다.
+- cgroup 경로가 지원 형식이 아니거나 소속 증거가 없으면 NO_DATA다. 컨테이너 수집 완전성은 판단하지 않으며 OBSERVED_CONTAINERS_ONLY로 명시한다. 프론트·DB 스키마·ML 변경 없음.
+- 전체 49개 테스트 통과(실패·오류·건너뜀 0), BUILD SUCCESS. 실제 Prometheus에서 CPU·메모리 각 1개 시리즈, 잘못된 서비스와 UID는 빈 결과 확인. 실제 백엔드 두 메트릭 모두 5분/30초의 10개 지점 AVAILABLE 반환. Swagger CPU 실행 결과도 확인했다. MySQL 전용 전체 테스트·부하 테스트·원격 CI는 이번 작업 범위에서 미실행.
+
+- 브라우저 제어 연결 오류가 재발했으나 제어 세션 초기화 및 기존 탭 재연결로 복구했다. 애플리케이션 오류와 구분했다. 실제 cgroupfs 지표 검증 완료, systemd 경로는 구현만 포함하며 별도 환경 검증은 미실행이다.
+- 기능 1d0f6ad, 테스트 0567861을 분리 커밋. 사용자 요청에 따라 현재 main에서 작업했고 문서 커밋과 함께 배치 푸시한다.

@@ -64,7 +64,7 @@ MySQL 데이터는 Compose의 `mysql-data` 볼륨에 남습니다. `docker compo
 3. 해당 ID로 서비스 목록·메트릭·로그·요청 추적 API를 호출합니다. 시간 조회에는 저장소에 데이터가 있는 최근 UTC 시각을 사용합니다.
 4. **Server response**가 실제 호출 결과입니다. 문서의 **Example Value**는 응답 형식 예시이며 실제 관측값이 아닙니다. POST/PUT의 Execute는 실제 설정을 저장하거나 연결 검사를 실행합니다.
 
-현재 구현한 18개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
+현재 구현한 19개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
 
 Spring Boot 4용 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 사용합니다. 참고: [공식 시작 문서](https://springdoc.org/#getting-started), [호환성 안내](https://springdoc.org/faq.html).
 
@@ -411,3 +411,19 @@ Loki는 namespace와 Deployment를 고정하고 최신 로그 한 건의 이벤�
 service는 Deployment 이름이다. namespace 내 kube_pod_owner와 kube_replicaset_owner의 controller 소유 관계를 조인하며 이름 접두사로 추정하지 않는다. Pod 이름과 UID, Ready 조건, 현재 관측된 일반 컨테이너의 재시작 수 합계를 반환한다. UID로 재생성된 Pod를 구분한다. init 컨테이너는 제외하며 일부 컨테이너 지표 누락 시 완전한 합계임을 보장하지 않는다.
 
 원본 샘플이 조회 기준 60초 이내인 경우만 사용한다. 결측 ready/restarts는 null, 실제 false/0과 구분한다. 최대 500 Pod다. 빈 목록은 NO_DATA로 반환하며 미배포·스케일0·수집 누락을 구분하지 않는다. AVAILABLE은 서비스 건강 판정이 아니다. 경고 CURRENT_SAMPLES_ONLY는 현재 샘플만 사용하는 제한을 나타낸다. 과거 이력·Pod 지표 시계열은 별도 API다.
+
+
+### Pod별 CPU·메모리 시계열 (API-17)
+
+`GET /api/v1/environments/{id}/services/{service}/pods/{pod}/metrics`
+
+| 파라미터 | 계약 |
+|---|---|
+| `uid` | Pod 목록에서 받은 소문자 UUID, 필수 |
+| `metric` | `cpu_usage_cores` 또는 `memory_working_set_bytes` |
+| `from`, `to` | UTC ISO 8601 초 단위, from 포함·to 제외, 최대 24시간 |
+| `stepSeconds` | 기본 30, 5~3600초, 최대 1440지점 |
+
+CPU는 1분 rate의 cores, 메모리는 working set bytes다. 각 평가 시점의 Pod→ReplicaSet→Deployment 소유 관계 및 UID를 검증한다. 현재 Pod 목록에 없는 과거 Pod도 해당 시점 소유 지표가 남아 있으면 조회할 수 있다. cAdvisor의 `id`에서 Pod UID가 확인되는 cgroupfs(`pod<uuid>/`)·systemd(`pod<uuid_with_underscores>.slice/`) 경로만 지원한다. 다른 경로의 데이터는 이름으로 추정하지 않고 미관측 처리한다.
+
+원본 사용량·소유 지표는 평가 시점 기준 60초 이내여야 한다. CPU rate에는 최소 2개 샘플이 필요하다. 일부 시점 결측은 `null`/`PARTIAL`, 전부 결측은 `NO_DATA`, 실제 0은 0이다. 빈 결과는 Pod 부재·소속 불일치·수집 누락 중 무엇인지 확정하지 않는다. 컨테이너별 중복 수집은 max 후 합산한다. `OBSERVED_CONTAINERS_ONLY`는 일부 컨테이너 누락 여부를 판정하지 않았다는 뜻이며, AVAILABLE도 전체 수집 완전성이나 서비스 정상 판정이 아니다. CPU 백분율·limit 대비 비율은 이번 API 범위 밖이다.
