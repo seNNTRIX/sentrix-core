@@ -251,3 +251,9 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 - 전체 비ML 완료로 주장하지 않는다. MySQL 전용 전체 테스트·부하 검증·원격 CI 미실행. 현황표의 대기 항목은 여전히 남은 작업이다.
 
 - 후속 검증: 실제 MySQL 서버 기동 및 GET monitoring의 DISABLED/UNAVAILABLE/null 응답 확인. OpenAPI의 GET/PUT monitoring 등록 확인. 브라우저 제어 연결 오류로 새 Swagger 항목의 화면 조작 검증은 미완료.
+
+### 2026-10-28 — Swagger 브라우저 연결 복구 및 실호출 검증
+
+- 이전 `browser.user is unavailable`는 애플리케이션 HTTP 오류가 아니라 브라우저 제어 연결 오류였다. 제어 세션을 초기화하고 현재 브라우저/탭 목록에서 Swagger 탭을 다시 연결했다. 현재 조작 복구를 확인했으며 도구 내부 재발 방지 수정은 범위 밖이다.
+- backend health UP, Swagger HTML 200, GET monitoring 200 확인. Swagger 화면에서 06. 분석 실행 설정 → GET → Try it out → environmentId=1 → Execute로 실제 200 및 DISABLED/UNAVAILABLE 응답을 확인했다. 이전 화면 조작 미검증 항목을 해소했다.
+- 애플리케이션 코드·DB 설정 변경 없음. 전체 테스트는 재실행하지 않았다. 전체 비ML 개발 및 관측 저장소의 장시간 지연 검증이 완료됐다는 의미는 아니다.
