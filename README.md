@@ -64,7 +64,7 @@ MySQL 데이터는 Compose의 `mysql-data` 볼륨에 남습니다. `docker compo
 3. 해당 ID로 서비스 목록·메트릭·로그·요청 추적 API를 호출합니다. 시간 조회에는 저장소에 데이터가 있는 최근 UTC 시각을 사용합니다.
 4. **Server response**가 실제 호출 결과입니다. 문서의 **Example Value**는 응답 형식 예시이며 실제 관측값이 아닙니다. POST/PUT의 Execute는 실제 설정을 저장하거나 연결 검사를 실행합니다.
 
-현재 구현한 13개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
+현재 구현한 14개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
 
 Spring Boot 4용 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 사용합니다. 참고: [공식 시작 문서](https://springdoc.org/#getting-started), [호환성 안내](https://springdoc.org/faq.html).
 
@@ -79,6 +79,7 @@ Spring Boot 4용 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 사용합니다.
 | GET | `/api/v1/environments/{id}/data-sources` | 저장된 데이터 소스 설정·최근 연결 테스트 결과 |
 | PUT | `/api/v1/environments/{id}/data-sources/{type}` | 종류별 설정 생성·변경 |
 | POST | `/api/v1/environments/{id}/data-sources/{type}/test` | 저장된 주소로 실제 readiness 요청 후 결과 저장 |
+| GET | `/api/v1/environments/{id}/collection-status?service=frontend` | 서비스별 대표 지표·로그·trace 최신성 확인 |
 | GET | `/api/v1/environments/{id}/services` | 등록 namespace에서 관측되는 Deployment 목록 |
 | GET | `/api/v1/environments/{id}/services/{service}/status` | 최근 Deployment 인스턴스 수·준비 상태 |
 | GET | `/api/v1/environments/{id}/logs` | 서비스·기간·문자열별 Loki 로그 검색 |
@@ -349,3 +350,39 @@ GET /api/v1/environments/1/traces/11111111111111111111111111111111
 - 저장소 응답 4MiB, 상세 5,000 span 제한. 과대·손상 응답, ID 불일치, 중복 ID, 부모 순환을 거부한다. 미수집/만료/다른 환경의 trace는 `404 TRACE_NOT_FOUND`; 저장소 장애는 502/504, 미설정은 409. 임의 URL·리다이렉트는 기존 허용 목록 정책으로 차단한다.
 - 원본은 Tempo에 보관하고 MySQL에 복제하지 않는다. 이 제한된 화면 조회 API는 ML 학습/전체 window 수집 용도가 아니다. 운영 환경의 사용자 인증·tenant 격리는 별도 작업이다.
 - 로컬 설치: [dev/observability/README.md](dev/observability/README.md). API 형식 참고: [Tempo HTTP API](https://grafana.com/docs/tempo/latest/api_docs/). 테스트 대상 chart 1.24.4의 v2 trace 응답을 사용한다.
+
+
+## 수집 데이터 최신성 확인
+
+```http
+GET /api/v1/environments/1/collection-status?service=frontend
+```
+
+환경 내 서비스 하나의 최근 데이터 증거를 조회한다. `service`는 필수이며 기존 Deployment/service.name 계약을 따른다. 저장소마다 조회하며 DB 설정이나 마지막 연결 검사 결과를 변경하지 않는다. 현재 시각 기준 최근 30분을 조회하고 180초를 최신성 기준으로 사용한다. 180초는 초기 화면 표시 기준이며 ML 임계값이나 장애 판정 기준이 아니다.
+
+| 응답 | 의미 |
+|---|---|
+| `from`, `to` | 공통 조회 구간. age와 최신성 판정의 기준 시각은 `to` |
+| `checkedAt` | 모든 조회를 마친 시각 |
+| `lookbackSeconds`, `freshnessThresholdSeconds` | 각각 1800, 180 |
+| `signals[].signal` | deployment_metrics, request_metrics, logs, traces |
+| `queryStatus` | OK / PARTIAL / ERROR / NOT_CONFIGURED |
+| `freshness` | RECENT / STALE / NO_DATA / UNKNOWN |
+| `observedAt`, `ageSeconds` | 관측한 원본 시각과 `to` 대비 나이(초, 소수점 버림). 모르는 값은 null |
+| `timestampKind` | SAMPLE_TIME / LOG_EVENT_TIME / TRACE_START_TIME |
+| `failureCode`, `warnings` | 조회 실패 코드와 판정 해석에 필요한 경고 |
+
+- **RECENT**: 180초 이내의 증거가 있다. 지속 수집·전체 Pod 계측·서비스 정상 판정은 아니다.
+- **STALE**: 조회 범위에서 찾은 데이터가 180초보다 오래됐다. 수집기 고장으로 단정하지 않는다.
+- **NO_DATA**: 이번 구간에서 대상 데이터를 찾지 못했다. 무트래픽·미계측·수집 중단·보관 만료 중 어떤 이유인지 이 응답만으로 확정하지 않는다.
+- **UNKNOWN**: 미설정, 조회 실패, 부분 검색, 미래 시각, 조회 구간 밖에서 시작한 trace 등 판정할 근거가 부족하다.
+
+Prometheus는 `kube_deployment_status_replicas`와 `traces_span_metrics_calls_total`의 원본 `timestamp()`를 조회한다. 30분/30초 간격 이력과 현재 샘플을 함께 확인하며 평가 시각으로 오래된 원본을 새 데이터처럼 만들지 않는다. 0인 샘플도 수집 증거다. 대표 시리즈 기준이므로 CPU·메모리·모든 Pod의 수집 완전성까지 증명하지 않는다(`REPRESENTATIVE_SERIES_ONLY`). 요청 counter가 변하지 않아도 scrape가 지속되면 RECENT일 수 있다(`SCRAPE_TIME_NOT_REQUEST_ACTIVITY`).
+
+Loki는 namespace와 Deployment를 고정하고 최신 로그 한 건의 이벤트 시각만 반환한다. 로그 원문은 이 API에 반환하지 않는다. Tempo는 같은 span의 namespace·서비스 조건과 `most_recent=true`, limit=1로 검색한다. 반환된 매칭 span의 속성도 확인한다. 최신 **trace 시작 시각**을 쓰므로 해당 서비스 span의 시작·수신 시각과 다를 수 있다. 로그·trace 모두 저장소에 도착한 시각이 아니다(`EVENT_TIME_NOT_INGESTION_TIME`). Tempo의 최신 검색 힌트를 지원하지 않는 버전은 ERROR/UNKNOWN으로 표시하며 처음 발견한 trace를 최신으로 대체하지 않는다.
+
+불완전 검색은 `UPSTREAM_PARTIAL`, 미래 원본 시각은 `FUTURE_TIMESTAMP`, 구간 이전에 시작한 trace는 `TRACE_START_OUTSIDE_WINDOW`로 표시한다. NO_DATA/STALE은 `CAUSE_UNDETERMINED` 경고를 포함한다. 이는 별도의 수집기 heartbeat나 계측 목록을 대신하지 않는다.
+
+저장소 실패·미설정은 **HTTP 200의 해당 signal**에 담고 다른 저장소 결과는 유지한다. 환경 없음은 404, 잘못된 서비스/누락 입력은 400, 조회 작업 중단은 503이다. 기존 URL 허용 목록, 리다이렉트 금지, 4MiB 응답 상한을 적용한다. 한 요청은 Prometheus 1회, Loki 1회, Tempo 1회를 순차 조회하므로 최대 각 source timeout의 합계(30초)만큼 걸릴 수 있다. 자동 반복 감시·DB 이력 저장·프론트 카드 추가는 이번 범위가 아니다.
+
+공식 근거: [Prometheus timestamp 함수](https://prometheus.io/docs/prometheus/latest/querying/functions/#timestamp), [Tempo 최신 검색 힌트](https://grafana.com/docs/tempo/latest/traceql/construct-traceql-queries/#retrieve-most-recent-results-experimental). 현재 로컬 Tempo 2.9.0에서 실제 응답 지원을 확인했다.

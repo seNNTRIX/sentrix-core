@@ -31,7 +31,8 @@ class OpenApiTests {
                 count++;
             }
         }
-        assertThat(count).isEqualTo(13);
+        assertThat(count).isEqualTo(14);
+        assertThat(paths.has("/api/v1/environments/{environmentId}/collection-status")).isTrue();
         assertThat(doc.path("servers").get(0).path("url").asText()).isEqualTo("/");
         assertThat(paths.has("/api/v1/environments/{environmentId}/traces/{traceId}")).isTrue();
         assertThat(paths.has("/actuator/health")).isTrue();

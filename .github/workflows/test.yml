@@ -37,4 +37,4 @@ jobs:
         run: >-
           docker run --rm --entrypoint /bin/promtool
           -v "$PWD/target:/tests:ro" prom/prometheus:v3.5.0
-          test rules /tests/prometheus-query-tests.yaml
+          test rules /tests/prometheus-query-tests.yaml /tests/collection-query-tests.yaml

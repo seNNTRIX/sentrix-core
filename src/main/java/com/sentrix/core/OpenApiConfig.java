@@ -49,6 +49,7 @@ class OpenApiConfig {
                 if (!path.equals("/api/v1/environments")) {
                     op.getResponses().addApiResponse("404", problem("환경 또는 요청한 설정·trace를 찾을 수 없음"));
                 }
+                if (path.endsWith("/collection-status")) op.getResponses().addApiResponse("503", problem("조회 작업 중단"));
                 boolean query = path.contains("/services") || path.endsWith("/metrics")
                         || path.endsWith("/logs") || path.contains("/traces");
                 if (query) {
