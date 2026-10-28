@@ -64,7 +64,7 @@ MySQL 데이터는 Compose의 `mysql-data` 볼륨에 남습니다. `docker compo
 3. 해당 ID로 서비스 목록·메트릭·로그·요청 추적 API를 호출합니다. 시간 조회에는 저장소에 데이터가 있는 최근 UTC 시각을 사용합니다.
 4. **Server response**가 실제 호출 결과입니다. 문서의 **Example Value**는 응답 형식 예시이며 실제 관측값이 아닙니다. POST/PUT의 Execute는 실제 설정을 저장하거나 연결 검사를 실행합니다.
 
-현재 구현한 15개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
+현재 구현한 17개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
 
 Spring Boot 4용 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 사용합니다. 참고: [공식 시작 문서](https://springdoc.org/#getting-started), [호환성 안내](https://springdoc.org/faq.html).
 
@@ -396,3 +396,10 @@ Loki는 namespace와 Deployment를 고정하고 최신 로그 한 건의 이벤�
 각 edge의 observedCalls는 이 trace에서 관측한 연결 수, explicitErrorCount는 SERVER의 명시적 ERROR 수, unsetStatusCount는 판정되지 않은 상태 수다. meanServerDurationMs/maxServerDurationMs는 SERVER span 시간이다. 전체 트래픽의 호출량·오류율·네트워크 왕복 시간이 아니다. 연결이 없으면 NO_OBSERVED_EDGES, 있으면 범위가 제한되어 PARTIAL을 반환한다. 기존 trace 경고도 보존한다.
 
 입력 400, 환경/trace 없음 404, Tempo 미설정 409, 저장소 실패 502/504, 중단 503은 기존 상세 조회 계약과 같다. 실제 환경 조회 성공 검증은 클러스터 복구 후 필요하다. 전체 기간 서비스 맵과 Deployment 매핑은 후속이다.
+
+## 분석 실행 설정 (모델 미연결)
+
+- `GET /api/v1/environments/{id}/monitoring`: 저장된 설정 조회. 미설정 기본값은 enabled=false, intervalSeconds=60.
+- `PUT /api/v1/environments/{id}/monitoring`: `{ "enabled": true, "intervalSeconds": 60 }` 저장. 두 필드 필수, 간격 30~3600초. 환경 없음 404, 입력 오류 400.
+- enabled는 사용자의 실행 의도다. 모델 미연결이므로 true일 때 실행 상태는 BLOCKED_MODEL_UNAVAILABLE, false는 DISABLED다. lastSuccessfulAt은 null이다. 실제 스케줄러·추론·장애 생성은 구현 전이며 성공을 꾸미지 않는다.
+- V3 migration으로 설정을 MySQL에 저장한다. 최초 동시 저장은 환경 행 잠금으로 직렬화한다.

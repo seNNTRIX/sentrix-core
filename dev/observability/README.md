@@ -41,3 +41,14 @@ Tempo URL은 `http://127.0.0.1:3200`이며 로컬 데이터 소스 timeout은 10
 현재 Online Boutique의 일부 서비스만 trace 계측되어 있다. Pod의 CPU·로그가 보여도 그 서비스의 span은 없을 수 있다. k6는 외부 parent ID를 보내므로 외부 부하 생성기 span이 저장되지 않으면 부모 누락 경고가 정상적으로 나타난다. 이것만으로 애플리케이션 장애라고 판단하지 않는다.
 
 기동 및 raw 응답 확인 버전: Tempo 2.9.0. Pod 교체 시 port-forward도 다시 실행해야 한다.
+
+## Docker 재시작 후 클러스터 복구
+
+컨테이너만 docker start하면 도구 노드와 서버 노드의 IP 배정 순서가 바뀔 수 있다. k3s가 `failed to find interface with specified node ip`로 종료되면 기존 클러스터를 삭제하지 말고 다음처럼 k3d로 재시작한다.
+
+```sh
+k3d cluster stop sentrix-local
+k3d cluster start sentrix-local --wait --timeout 60s
+```
+
+이 로컬 머신의 실행 파일은 `/private/tmp/sentrix-tools/k3d`에 있다. 클러스터 복구 후 각 port-forward를 다시 실행한다. 2026-10-28 기존 볼륨을 보존한 상태로 복구·Tempo 실제 조회를 확인했다.

@@ -64,8 +64,8 @@
 | API-17 | [ ] 대기 | `GET /api/v1/environments/{id}/services/{service}/pods/{pod}/metrics` | 해당 서비스에 속한 Pod의 CPU·메모리 시계열 반환 | API-16, 소속 검증 |
 | API-18 | [ ] 대기 | `GET /api/v1/environments/{id}/logs/volume` | 전체 대상 로그의 시간별 건수 집계 반환 | Loki 집계 쿼리·분류 기준 확정 |
 | API-19 | [ ] 대기 | `GET /api/v1/environments/{id}/overview` | 화면 주요 지표·관측 상태·진행 중 장애 수 요약 반환 | 집계 시각·부분 실패 계약 확정 |
-| API-20 | [ ] 대기 | `GET /api/v1/environments/{id}/monitoring` | 분석 실행 상태·마지막 성공 시각·실패 이유 반환 | BE-09, BE-13 |
-| API-21 | [ ] 대기 | `PUT /api/v1/environments/{id}/monitoring` | 자동 분석 활성화·중지와 사용할 모델 설정 저장 | BE-08, BE-09 |
+| API-20 | [ ] 진행 | `GET /api/v1/environments/{id}/monitoring` | 분석 실행 상태·마지막 성공 시각·실패 이유 반환 | BE-09, BE-13 |
+| API-21 | [ ] 진행 | `PUT /api/v1/environments/{id}/monitoring` | 자동 분석 활성화·중지와 사용할 모델 설정 저장 | BE-08, BE-09 |
 | API-22 | [ ] 보류 | `GET /api/v1/environments/{id}/anomaly-scores` | 실제 분석 점수·임계값·판정·모델 버전의 시계열 반환 | BE-10~13, 모델 연동 |
 | API-23 | [ ] 대기 | `GET /api/v1/environments/{id}/service-status/history` | 서비스별 정상·경고·이상·미판정 구간 반환 | BE-12, BE-13, ISS-05 |
 | API-24 | [ ] 대기 | `GET /api/v1/environments/{id}/incidents` | 기간·서비스·상태별 장애 목록 페이지 조회 | BE-13 |
@@ -241,3 +241,13 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 - ISS-11: 클러스터 재기동 실패. 컨테이너는 Up이지만 k3s가 `failed to find interface with specified node ip`로 종료되어 API 서버 연결 불가. MySQL은 healthy. 기존 볼륨·데이터는 삭제하지 않았다. 정확한 IP 갱신 경로와 k3d 복구는 다음 작업이다. API를 완료로 표시하지 않는다.
 - 구현 22c9d59, 테스트 1668d24를 별도 로컬 커밋. 문서 커밋 후 작업 커밋을 한 번에 푸시하고 원격 일치를 확인한다. 원격 CI·장시간 부하 검증 미실행.
 - 다음: 기존 클러스터 IP 복구 → 실제 trace 성공 검증 → 기간 단위 호출 관계 수집/집계 설계.
+
+### 2026-10-28 — ML 제외 전체 개발 요청 / 관측 환경 복구와 분석 설정
+
+- 전체 비ML 작업을 계속 개발한다. 현재 전체 완료가 아니다. 인증/환경 접근 권한, Pod·로그 집계·개요, 장애/작업 저장, 이벤트, 운영 검증이 남아 있다. ML 학습·추론은 제외하며 계약 합의도 미완료다.
+- ISS-11 조치: `/private/tmp/sentrix-tools/k3d cluster stop/start sentrix-local`로 도구 노드와 서버 노드를 순서대로 시작해 IP 일치를 복구. 기존 볼륨 보존. Prometheus/Loki/Tempo/frontend port-forward 재기동. Tempo 실제 trace와 service-map NO_OBSERVED_EDGES 응답 확인. 전체 연결이 있는 요청은 추가 검증 필요.
+- API-20/21은 설정 저장·조회 1차 구현. V3 monitoring_settings, 환경 행 잠금으로 동시 최초 저장 직렬화. enabled=true도 BLOCKED_MODEL_UNAVAILABLE. 스케줄러·작업 저장·재시도는 미구현이므로 API와 BE-09를 완료로 표시하지 않는다.
+- Java 21 H2 전체 44개 테스트·빌드 통과. 구현 8ac0236, 테스트 2d49954 별도 커밋. 실제 MySQL 서버에 V3 적용 확인은 아래 후속 검증 기록 참고.
+- 전체 비ML 완료로 주장하지 않는다. MySQL 전용 전체 테스트·부하 검증·원격 CI 미실행. 현황표의 대기 항목은 여전히 남은 작업이다.
+
+- 후속 검증: 실제 MySQL 서버 기동 및 GET monitoring의 DISABLED/UNAVAILABLE/null 응답 확인. OpenAPI의 GET/PUT monitoring 등록 확인. 브라우저 제어 연결 오류로 새 Swagger 항목의 화면 조작 검증은 미완료.
