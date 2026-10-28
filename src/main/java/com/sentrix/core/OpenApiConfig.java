@@ -50,7 +50,7 @@ class OpenApiConfig {
                     op.getResponses().addApiResponse("404", problem("환경 또는 요청한 설정·trace를 찾을 수 없음"));
                 }
                 if (path.endsWith("/collection-status")) op.getResponses().addApiResponse("503", problem("조회 작업 중단"));
-                boolean query = path.contains("/services") || path.endsWith("/metrics")
+                boolean query = path.endsWith("/service-map") || path.contains("/services") || path.endsWith("/metrics")
                         || path.endsWith("/logs") || path.contains("/traces");
                 if (query) {
                     op.getResponses().addApiResponse("409", problem("관측 저장소 미설정 또는 접근 대상이 현재 허용되지 않음"))
