@@ -15,11 +15,15 @@ class PodController {
     private final PrometheusClient prometheus;
     PodController(PrometheusClient prometheus){this.prometheus=prometheus;}
     static String fresh(String selector){return "("+selector+" and (timestamp("+selector+") >= time() - 60))";}
-    static String expression(String namespace,String service){
+    static String members(String namespace,String service){
         String ns="namespace=\""+namespace+"\"";
         String owners="max by(namespace,pod,uid,replicaset)(label_replace("+fresh("kube_pod_owner{"+ns+",owner_kind=\"ReplicaSet\",owner_is_controller=\"true\"}")+",\"replicaset\",\"$1\",\"owner_name\",\"(.+)\"))";
         String rs="max by(namespace,replicaset)("+fresh("kube_replicaset_owner{"+ns+",owner_kind=\"Deployment\",owner_is_controller=\"true\",owner_name=\""+service+"\"}")+")";
-        String members="max by(namespace,pod,uid)(("+owners+" * on(namespace,replicaset) group_left() "+rs+") == 1)";
+        return "max by(namespace,pod,uid)(("+owners+" * on(namespace,replicaset) group_left() "+rs+") == 1)";
+    }
+    static String expression(String namespace,String service){
+        String ns="namespace=\""+namespace+"\"";
+        String members=members(namespace,service);
         String ready="min by(namespace,pod,uid)("+fresh("kube_pod_status_ready{"+ns+",condition=\"true\"}")+")";
         String restarts="sum by(namespace,pod,uid)(max by(namespace,pod,uid,container)("+fresh("kube_pod_container_status_restarts_total{"+ns+"}")+"))";
         return field(members,"member")+" or "+field("("+ready+" and on(namespace,pod,uid) "+members+")","ready")+" or "+field("("+restarts+" and on(namespace,pod,uid) "+members+")","restarts");
