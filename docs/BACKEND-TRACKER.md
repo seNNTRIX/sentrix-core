@@ -7,8 +7,8 @@
 ## 1. 현재 어디까지 됐나
 
 - Java 21 / Spring Boot / MySQL 8.4 기반으로 환경·관측 저장소 설정을 저장한다.
-- Prometheus 메트릭·Deployment 준비 상태, Loki 로그, Tempo 트레이스를 조회하는 **14개 API를 구현**했다.
-- Swagger에서 구현된 14개 API를 한국어 설명과 함께 직접 호출할 수 있다(BE-16 완료).
+- Prometheus 메트릭·Deployment 준비 상태, Loki 로그, Tempo 트레이스를 조회하는 **18개 API operation을 구현**했다. 서비스 맵과 분석 실행 설정의 전체 범위는 아직 진행 중이다.
+- Swagger에서 구현된 18개 API operation을 한국어 설명과 함께 직접 호출할 수 있다(BE-16 완료).
 - 대시보드의 기존 디자인에 실제 조회 결과를 연결했다. 원본 관측 데이터는 MySQL에 복제하지 않는다.
 - 자동 이상 탐지, 장애 이력 저장, Python 모델 호출, RCA 결과 저장은 **아직 구현 전**이다. 현재 준비 상태 조회는 ML 장애 판정이 아니다.
 - 아래 완료 표시는 현재 로컬 코드와 기존 검증 기록 기준이다. 커밋·푸시·배포 완료를 뜻하지 않는다. 테스트 실행 여부와 범위는 아래 날짜별 작업 기록을 기준으로 확인한다.
@@ -60,7 +60,7 @@
 |---|---|---|---|---|
 | API-14 | [x] 완료 | `GET /api/v1/environments/{id}/collection-status?service=frontend` | 서비스별 대표 지표·로그·trace 최신성, 미관측·미설정·부분 응답·실패 구분 | BE-06, CollectionStatusApiTests |
 | API-15 | [ ] 진행 | `GET /api/v1/environments/{id}/service-map` | 관측된 서비스 간 호출 관계와 연결별 지표 반환 | BE-07 |
-| API-16 | [ ] 대기 | `GET /api/v1/environments/{id}/services/{service}/pods` | 서비스 소속 Pod·준비 상태·재시작 횟수 반환 | 소유 관계 및 수집 지표 확인 |
+| API-16 | [x] 완료 | `GET /api/v1/environments/{id}/services/{service}/pods` | 서비스 소속 Pod·준비 상태·재시작 횟수 반환 | PodControllerTests, 실제 Prometheus 및 Swagger 200 확인 |
 | API-17 | [ ] 대기 | `GET /api/v1/environments/{id}/services/{service}/pods/{pod}/metrics` | 해당 서비스에 속한 Pod의 CPU·메모리 시계열 반환 | API-16, 소속 검증 |
 | API-18 | [ ] 대기 | `GET /api/v1/environments/{id}/logs/volume` | 전체 대상 로그의 시간별 건수 집계 반환 | Loki 집계 쿼리·분류 기준 확정 |
 | API-19 | [ ] 대기 | `GET /api/v1/environments/{id}/overview` | 화면 주요 지표·관측 상태·진행 중 장애 수 요약 반환 | 집계 시각·부분 실패 계약 확정 |
@@ -263,3 +263,13 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 - sentrix-dashboard의 기존 C3-Settings 분석 탭에 GET/PUT monitoring 연결. 기존 탭·패널 스타일 유지, 실행 의도/주기 저장, 미연결 상태 표시. 백엔드 기능 변경 없음.
 - 브라우저에서 환경 1 조회·기존 비활성/60초 값 저장 성공 확인. Vite 프록시 경유 재조회에서 updatedAt 생성 확인. 환경 전환·언마운트 요청 취소와 응답 환경 검증 적용.
 - 프론트 테스트 11개·빌드 통과. 브라우저 실제 저장 성공 및 최종 패널 확인. 모델·서비스 맵 프론트 연결은 이번 작업에 포함하지 않았다. API-20/21 전체 실행 기능은 여전히 진행 중이다.
+
+### 2026-10-29 — Deployment 소속 Pod 목록 API
+
+- API-16 구현. Pod→ReplicaSet→Deployment controller 관계로 namespace를 제한하고 UID로 Pod 재생성을 구분한다. 준비 상태·일반 컨테이너 재시작 합계를 반환하며 미수집은 null이다.
+- 60초 이내 원본 샘플만 조회, 최대 500 Pod/1500 반환 시리즈 제한. 일부 컨테이너 누락 시 재시작 합계 완전성은 보장하지 않으며 init 컨테이너 제외를 README에 명시했다. API-17 Pod 메트릭 시계열은 다음 작업이다.
+- Java 21 전체 46개 테스트·빌드 통과. 실제 Prometheus에서 frontend-564f67b847-q8fvm과 UID, ready=1, restarts=0 결과 확인. 다른 환경 응답·비정수 카운트 거부 및 결측 검증 포함.
+- 구현 e371147, 테스트 6c345b7 각각 커밋. 실제 MySQL 연결 서버 기동 완료 후 Swagger에서 환경 1 / frontend 호출 200, AVAILABLE, Pod 1개·ready=true·restarts=0을 확인했다. DB migration 변경 없음.
+- MySQL 전체 테스트·부하 테스트·원격 CI 미실행. 현재 Pod 목록은 Kubernetes 준비 상태이며 ML 판정이 아니다.
+
+- 실행 중 문제: 서버 기동 전 Swagger 연결 거부와 첫 Pod 요청 504가 발생했다. 기동 후 재호출 및 Swagger 실제 실행은 200으로 회복했다. 첫 504의 원인은 확정하지 않았으며 로컬 자원 경합은 가설이다. 타임아웃 설정을 늘리거나 실패를 빈 목록으로 숨기지 않았다.

@@ -64,7 +64,7 @@ MySQL 데이터는 Compose의 `mysql-data` 볼륨에 남습니다. `docker compo
 3. 해당 ID로 서비스 목록·메트릭·로그·요청 추적 API를 호출합니다. 시간 조회에는 저장소에 데이터가 있는 최근 UTC 시각을 사용합니다.
 4. **Server response**가 실제 호출 결과입니다. 문서의 **Example Value**는 응답 형식 예시이며 실제 관측값이 아닙니다. POST/PUT의 Execute는 실제 설정을 저장하거나 연결 검사를 실행합니다.
 
-현재 구현한 17개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
+현재 구현한 18개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
 
 Spring Boot 4용 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 사용합니다. 참고: [공식 시작 문서](https://springdoc.org/#getting-started), [호환성 안내](https://springdoc.org/faq.html).
 
@@ -403,3 +403,11 @@ Loki는 namespace와 Deployment를 고정하고 최신 로그 한 건의 이벤�
 - `PUT /api/v1/environments/{id}/monitoring`: `{ "enabled": true, "intervalSeconds": 60 }` 저장. 두 필드 필수, 간격 30~3600초. 환경 없음 404, 입력 오류 400.
 - enabled는 사용자의 실행 의도다. 모델 미연결이므로 true일 때 실행 상태는 BLOCKED_MODEL_UNAVAILABLE, false는 DISABLED다. lastSuccessfulAt은 null이다. 실제 스케줄러·추론·장애 생성은 구현 전이며 성공을 꾸미지 않는다.
 - V3 migration으로 설정을 MySQL에 저장한다. 최초 동시 저장은 환경 행 잠금으로 직렬화한다.
+
+## Deployment 소속 Pod 목록
+
+`GET /api/v1/environments/{id}/services/{service}/pods`
+
+service는 Deployment 이름이다. namespace 내 kube_pod_owner와 kube_replicaset_owner의 controller 소유 관계를 조인하며 이름 접두사로 추정하지 않는다. Pod 이름과 UID, Ready 조건, 현재 관측된 일반 컨테이너의 재시작 수 합계를 반환한다. UID로 재생성된 Pod를 구분한다. init 컨테이너는 제외하며 일부 컨테이너 지표 누락 시 완전한 합계임을 보장하지 않는다.
+
+원본 샘플이 조회 기준 60초 이내인 경우만 사용한다. 결측 ready/restarts는 null, 실제 false/0과 구분한다. 최대 500 Pod다. 빈 목록은 NO_DATA로 반환하며 미배포·스케일0·수집 누락을 구분하지 않는다. AVAILABLE은 서비스 건강 판정이 아니다. 경고 CURRENT_SAMPLES_ONLY는 현재 샘플만 사용하는 제한을 나타낸다. 과거 이력·Pod 지표 시계열은 별도 API다.
