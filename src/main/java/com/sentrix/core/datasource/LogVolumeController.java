@@ -25,7 +25,7 @@ class LogVolumeController {
 
     @Operation(summary="시간별 로그 건수 집계", description="service/from/to 필수. Loki count_over_time으로 검색 결과 상한 없이 집계합니다. UTC 초 단위, 최대 24시간, bucketSeconds 60~3600(기본 60), 최대 720구간이며 조회 길이는 버킷 크기의 배수여야 합니다. 로그 검색 API와 달리 각 구간은 시작 제외·끝 포함 (from,to]입니다. search는 최대 200자 원문 포함 검색. 결측은 null이며 로그 없음과 수집 중단을 구분하지 못합니다. 건수는 저장된 로그 행 수이며 요청 수·장애 수가 아닙니다.")
     @GetMapping
-    Result volume(@PathVariable Long environmentId,@RequestParam String service,@RequestParam Instant from,@RequestParam Instant to,
+    LogVolumeResult volume(@PathVariable Long environmentId,@RequestParam String service,@RequestParam Instant from,@RequestParam Instant to,
                   @RequestParam(defaultValue="60") int bucketSeconds,@RequestParam(defaultValue="") String search) {
         if(!service.matches("[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?") || search.length()>200 || search.chars().anyMatch(Character::isISOControl)
                 || from.getNano()!=0 || to.getNano()!=0 || from.isBefore(Instant.EPOCH) || !from.isBefore(to)
@@ -67,11 +67,11 @@ class LogVolumeController {
             Instant start=from.plusSeconds(i*bucketSeconds),end=start.plusSeconds(bucketSeconds);
             buckets.add(new Bucket(start,end,values.get(end)));
         }
-        return new Result(environmentId,env.getNamespace(),service,from,to,bucketSeconds,search,"START_EXCLUSIVE_END_INCLUSIVE",status,List.copyOf(warnings),List.copyOf(buckets));
+        return new LogVolumeResult(environmentId,env.getNamespace(),service,from,to,bucketSeconds,search,"START_EXCLUSIVE_END_INCLUSIVE",status,List.copyOf(warnings),List.copyOf(buckets));
     }
     private static org.springframework.web.server.ResponseStatusException bad(String detail){return error(HttpStatus.BAD_REQUEST,"INVALID_QUERY",detail);}
     private static org.springframework.web.server.ResponseStatusException invalid(){return error(HttpStatus.BAD_GATEWAY,"INVALID_LOKI_RESPONSE","Unexpected Loki volume response");}
     record Bucket(Instant from,Instant to,Long count){}
-    record Result(Long environmentId,String namespace,String service,Instant from,Instant to,int bucketSeconds,String search,
+    record LogVolumeResult(Long environmentId,String namespace,String service,Instant from,Instant to,int bucketSeconds,String search,
                   String intervalBounds,String dataStatus,List<String>warnings,List<Bucket>buckets){}
 }

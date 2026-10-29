@@ -32,6 +32,13 @@ class OpenApiTests {
             }
         }
         assertThat(count).isEqualTo(20);
+        var volume = paths.path("/api/v1/environments/{environmentId}/logs/volume").path("get");
+        String volumeRef = volume.path("responses").path("200").path("content").path("*/*").path("schema").path("$ref").asText();
+        assertThat(volumeRef).isEqualTo("#/components/schemas/LogVolumeResult");
+        var volumeProperties = doc.path("components").path("schemas").path("LogVolumeResult").path("properties");
+        assertThat(volumeProperties.has("buckets")).isTrue();
+        assertThat(volumeProperties.has("pod")).isFalse();
+        assertThat(volume.path("responses").has("504")).isTrue();
         assertThat(paths.has("/api/v1/environments/{environmentId}/collection-status")).isTrue();
         assertThat(doc.path("servers").get(0).path("url").asText()).isEqualTo("/");
         assertThat(paths.has("/api/v1/environments/{environmentId}/traces/{traceId}")).isTrue();
