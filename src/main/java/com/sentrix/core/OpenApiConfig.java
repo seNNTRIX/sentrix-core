@@ -51,7 +51,7 @@ class OpenApiConfig {
                 }
                 if (path.endsWith("/collection-status")) op.getResponses().addApiResponse("503", problem("조회 작업 중단"));
                 boolean query = path.endsWith("/service-map") || path.contains("/services") || path.endsWith("/metrics")
-                        || path.endsWith("/logs") || path.contains("/traces");
+                        || (path.endsWith("/logs") || path.endsWith("/logs/volume")) || path.contains("/traces");
                 if (query) {
                     op.getResponses().addApiResponse("409", problem("관측 저장소 미설정 또는 접근 대상이 현재 허용되지 않음"))
                             .addApiResponse("502", problem("관측 저장소 연결·응답 오류 또는 응답 크기 제한 초과"))
