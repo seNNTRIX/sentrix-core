@@ -64,7 +64,7 @@ MySQL 데이터는 Compose의 `mysql-data` 볼륨에 남습니다. `docker compo
 3. 해당 ID로 서비스 목록·메트릭·로그·요청 추적 API를 호출합니다. 시간 조회에는 저장소에 데이터가 있는 최근 UTC 시각을 사용합니다.
 4. **Server response**가 실제 호출 결과입니다. 문서의 **Example Value**는 응답 형식 예시이며 실제 관측값이 아닙니다. POST/PUT의 Execute는 실제 설정을 저장하거나 연결 검사를 실행합니다.
 
-현재 구현한 19개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
+현재 구현한 20개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
 
 Spring Boot 4용 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 사용합니다. 참고: [공식 시작 문서](https://springdoc.org/#getting-started), [호환성 안내](https://springdoc.org/faq.html).
 
@@ -427,3 +427,15 @@ service는 Deployment 이름이다. namespace 내 kube_pod_owner와 kube_replica
 CPU는 1분 rate의 cores, 메모리는 working set bytes다. 각 평가 시점의 Pod→ReplicaSet→Deployment 소유 관계 및 UID를 검증한다. 현재 Pod 목록에 없는 과거 Pod도 해당 시점 소유 지표가 남아 있으면 조회할 수 있다. cAdvisor의 `id`에서 Pod UID가 확인되는 cgroupfs(`pod<uuid>/`)·systemd(`pod<uuid_with_underscores>.slice/`) 경로만 지원한다. 다른 경로의 데이터는 이름으로 추정하지 않고 미관측 처리한다.
 
 원본 사용량·소유 지표는 평가 시점 기준 60초 이내여야 한다. CPU rate에는 최소 2개 샘플이 필요하다. 일부 시점 결측은 `null`/`PARTIAL`, 전부 결측은 `NO_DATA`, 실제 0은 0이다. 빈 결과는 Pod 부재·소속 불일치·수집 누락 중 무엇인지 확정하지 않는다. 컨테이너별 중복 수집은 max 후 합산한다. `OBSERVED_CONTAINERS_ONLY`는 일부 컨테이너 누락 여부를 판정하지 않았다는 뜻이며, AVAILABLE도 전체 수집 완전성이나 서비스 정상 판정이 아니다. CPU 백분율·limit 대비 비율은 이번 API 범위 밖이다.
+
+
+### 시간별 로그 건수 (API-18)
+
+`GET /api/v1/environments/{id}/logs/volume?service=frontend&from=...&to=...&bucketSeconds=60`
+
+- `service`, `from`, `to` 필수. UTC 초 단위, 최대 24시간. `bucketSeconds` 기본 60, 60~3600, 최대 720구간. 조회 길이는 버킷 크기의 배수여야 한다. `search`는 로그 검색과 동일한 200자 이하 원문 포함 검색이다.
+- Loki `sum by(k8s_namespace_name,k8s_deployment_name)(count_over_time(...[Ns]))`로 저장된 일치 로그 전체를 집계한다. 화면 검색의 500줄 상한과 독립적이며 응답은 최대 720개 버킷이다. 공통 응답 크기 4MiB·데이터 소스 타임아웃 제한은 적용한다.
+- **각 버킷은 시작 제외·끝 포함 `(from,to]`**이다. 기존 로그 검색 `[from,to)`와 경계가 다르며 응답 `intervalBounds=START_EXCLUSIVE_END_INCLUSIVE`에 명시한다. 버킷 끝 시각부터 직전 N초를 집계하여 중첩하지 않는다. 마지막 불완전 구간은 허용하지 않는다.
+- 반환: 환경·namespace·service, 조회 조건, `dataStatus`, `warnings`, `buckets[{from,to,count}]`. Loki가 반환한 0은 0, 없는 버킷은 null. 모두 없으면 NO_DATA, 일부 없거나 저장소 경고가 있으면 PARTIAL. 집계 실패는 502/504이며 빈 목록으로 숨기지 않는다.
+- `COLLECTION_COMPLETENESS_UNKNOWN`: 저장된 로그 기준이며 수집 누락 여부는 알 수 없다. AVAILABLE도 수집 완전성이나 서비스 정상 판정이 아니다. 건수는 로그 행 수로 요청·에러·장애 건수가 아니며, 심각도 자동 분류 및 수집 중복 제거는 하지 않는다.
+- 근거: [Loki HTTP API](https://grafana.com/docs/loki/latest/reference/loki-http-api/), [LogQL 집계 예시](https://grafana.com/docs/loki/latest/query/query_examples/), [range iterator 경계 구현](https://github.com/grafana/loki/blob/main/pkg/logql/range_vector.go).
