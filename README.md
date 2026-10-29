@@ -433,7 +433,7 @@ CPU는 1분 rate의 cores, 메모리는 working set bytes다. 각 평가 시점�
 
 `GET /api/v1/environments/{id}/logs/volume?service=frontend&from=...&to=...&bucketSeconds=60`
 
-- `service`, `from`, `to` 필수. UTC 초 단위, 최대 24시간. `bucketSeconds` 기본 60, 60~3600, 최대 720구간. 조회 길이는 버킷 크기의 배수여야 한다. `search`는 로그 검색과 동일한 200자 이하 원문 포함 검색이다.
+- `service`, `from`, `to` 필수. UTC 초 단위, 최대 24시간. `bucketSeconds` 기본 60, 60~3600, 최대 720구간. 시작·끝 Unix 초는 버킷 크기의 배수여야 한다. Loki의 step 경계 자동 정렬로 다른 시각의 값이 반환되는 것을 막기 위해 미정렬 요청은 400으로 거부한다. `search`는 로그 검색과 동일한 200자 이하 원문 포함 검색이다.
 - Loki `sum by(k8s_namespace_name,k8s_deployment_name)(count_over_time(...[Ns]))`로 저장된 일치 로그 전체를 집계한다. 화면 검색의 500줄 상한과 독립적이며 응답은 최대 720개 버킷이다. 공통 응답 크기 4MiB·데이터 소스 타임아웃 제한은 적용한다.
 - **각 버킷은 시작 제외·끝 포함 `(from,to]`**이다. 기존 로그 검색 `[from,to)`와 경계가 다르며 응답 `intervalBounds=START_EXCLUSIVE_END_INCLUSIVE`에 명시한다. 버킷 끝 시각부터 직전 N초를 집계하여 중첩하지 않는다. 마지막 불완전 구간은 허용하지 않는다.
 - 반환: 환경·namespace·service, 조회 조건, `dataStatus`, `warnings`, `buckets[{from,to,count}]`. Loki가 반환한 0은 0, 없는 버킷은 null. 모두 없으면 NO_DATA, 일부 없거나 저장소 경고가 있으면 PARTIAL. 집계 실패는 502/504이며 빈 목록으로 숨기지 않는다.
