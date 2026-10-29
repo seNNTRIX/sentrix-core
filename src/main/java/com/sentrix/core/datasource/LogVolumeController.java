@@ -23,7 +23,7 @@ class LogVolumeController {
         this.environments=environments; this.sources=sources; this.http=http; this.mapper=mapper;
     }
 
-    @Operation(summary="시간별 로그 건수 집계", description="service/from/to 필수. Loki count_over_time으로 검색 결과 상한 없이 집계합니다. UTC 초 단위, 최대 24시간, bucketSeconds 60~3600(기본 60), 최대 720구간이며 조회 길이는 버킷 크기의 배수여야 합니다. 로그 검색 API와 달리 각 구간은 시작 제외·끝 포함 (from,to]입니다. search는 최대 200자 원문 포함 검색. 결측은 null이며 로그 없음과 수집 중단을 구분하지 못합니다. 건수는 저장된 로그 행 수이며 요청 수·장애 수가 아닙니다.")
+    @Operation(summary="시간별 로그 건수 집계", description="service/from/to 필수. Loki count_over_time으로 검색 결과 상한 없이 집계합니다. UTC 초 단위, 최대 24시간, bucketSeconds 60~3600(기본 60), 최대 720구간이며 시작·끝의 Unix 초는 버킷 크기의 배수여야 합니다. 로그 검색 API와 달리 각 구간은 시작 제외·끝 포함 (from,to]입니다. search는 최대 200자 원문 포함 검색. 결측은 null이며 로그 없음과 수집 중단을 구분하지 못합니다. 건수는 저장된 로그 행 수이며 요청 수·장애 수가 아닙니다.")
     @GetMapping
     LogVolumeResult volume(@PathVariable Long environmentId,@RequestParam String service,@RequestParam Instant from,@RequestParam Instant to,
                   @RequestParam(defaultValue="60") int bucketSeconds,@RequestParam(defaultValue="") String search) {
@@ -32,7 +32,7 @@ class LogVolumeController {
                 || Duration.between(from,to).compareTo(Duration.ofHours(24))>0 || bucketSeconds<60 || bucketSeconds>3600)
             throw bad("Use whole seconds, up to 24 hours, bucketSeconds 60..3600 and a valid service/search");
         long duration=Duration.between(from,to).getSeconds(), count=duration/bucketSeconds;
-        if(duration%bucketSeconds!=0 || count>720) throw bad("Range must be a multiple of bucketSeconds, at most 720 buckets");
+        if(from.getEpochSecond()%bucketSeconds!=0 || to.getEpochSecond()%bucketSeconds!=0 || duration%bucketSeconds!=0 || count>720) throw bad("Timestamps must align to Unix epoch bucket boundaries, at most 720 buckets");
         try {Math.multiplyExact(to.getEpochSecond(),1_000_000_000L);} catch(ArithmeticException e){throw bad("Timestamp outside supported range");}
         var env=environments.findById(environmentId).orElseThrow(()->error(HttpStatus.NOT_FOUND,"ENVIRONMENT_NOT_FOUND","Environment not found"));
         var source=sources.findByEnvironmentIdAndType(environmentId,DataSourceType.LOKI)

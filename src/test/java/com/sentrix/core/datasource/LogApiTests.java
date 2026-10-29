@@ -95,19 +95,19 @@ class LogApiTests {
         return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"k8s_namespace_name\":\"sentrix\",\"k8s_deployment_name\":\"frontend\"},\"values\":"+values+"}]}}";
     }
     org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder volumeRequest() {
-        return get(base+"/volume").param("service","frontend").param("from","2023-11-14T22:13:20Z").param("to","2023-11-14T22:15:20Z");
+        return get(base+"/volume").param("service","frontend").param("from","2023-11-14T22:13:00Z").param("to","2023-11-14T22:15:00Z");
     }
     @Test void volumeCountsAllLinesAndPreservesMissingBuckets() throws Exception {
-        payload.set(matrix("[[1700000060,\"701\"]]"));
+        payload.set(matrix("[[1700000040,\"701\"]]"));
         mvc.perform(volumeRequest().param("search","\" |~ `.*`")) .andExpect(status().isOk())
             .andExpect(jsonPath("$.buckets.length()").value(2)).andExpect(jsonPath("$.buckets[0].count").value(701))
             .andExpect(jsonPath("$.buckets[1].count").isEmpty()).andExpect(jsonPath("$.dataStatus").value("PARTIAL"))
             .andExpect(jsonPath("$.intervalBounds").value("START_EXCLUSIVE_END_INCLUSIVE"));
         String decoded=URLDecoder.decode(query.get(),StandardCharsets.UTF_8);
-        assertTrue(decoded.contains("count_over_time"));assertTrue(decoded.contains("start=2023-11-14T22:14:20Z"));
-        assertTrue(decoded.contains("end=2023-11-14T22:15:20Z"));assertTrue(decoded.contains("step=60"));assertFalse(decoded.contains("limit="));
+        assertTrue(decoded.contains("count_over_time"));assertTrue(decoded.contains("start=2023-11-14T22:14:00Z"));
+        assertTrue(decoded.contains("end=2023-11-14T22:15:00Z"));assertTrue(decoded.contains("step=60"));assertFalse(decoded.contains("limit="));
         assertTrue(decoded.contains("|= \"\\\" |~ `.*`\""));
-        payload.set(matrix("[[1700000060,\"0\"],[1700000120,\"2\"]]"));
+        payload.set(matrix("[[1700000040,\"0\"],[1700000100,\"2\"]]"));
         mvc.perform(volumeRequest()).andExpect(status().isOk()).andExpect(jsonPath("$.dataStatus").value("AVAILABLE"))
             .andExpect(jsonPath("$.buckets[0].count").value(0));
         payload.set("{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[]}}");
@@ -119,13 +119,14 @@ class LogApiTests {
         mvc.perform(volumeRequest().param("search","bad\n")).andExpect(status().isBadRequest());
         mvc.perform(get(base+"/volume").param("service","frontend").param("from","2023-11-14T00:00:00Z")
             .param("to","2023-11-15T00:00:00Z")).andExpect(status().isBadRequest());
+        mvc.perform(get(base+"/volume").param("service","frontend").param("from","2023-11-14T22:13:20Z").param("to","2023-11-14T22:15:20Z")).andExpect(status().isBadRequest());
         assertEquals(0,requests.get());
     }
     @Test void volumeRejectsWrongScopeMalformedCountsAndUpstreamErrors() throws Exception {
-        String good=matrix("[[1700000060,\"2\"]]");
+        String good=matrix("[[1700000040,\"2\"]]");
         for(String bad:List.of(good.replace("sentrix","other"),good.replace("frontend","cartservice"),
-                matrix("[[1700000060,\"1.5\"]]"),matrix("[[1700000060,\"-1\"]]"),matrix("[[1700000060,\"NaN\"]]"),
-                matrix("[[1700000000,\"1\"]]"),matrix("[[1700000061,\"1\"]]"),matrix("[[1700000060,\"1\"],[1700000060,\"2\"]]"))) {
+                matrix("[[1700000040,\"1.5\"]]"),matrix("[[1700000040,\"-1\"]]"),matrix("[[1700000040,\"NaN\"]]"),
+                matrix("[[1699999980,\"1\"]]"),matrix("[[1700000041,\"1\"]]"),matrix("[[1700000040,\"1\"],[1700000040,\"2\"]]"))) {
             payload.set(bad);mvc.perform(volumeRequest()).andExpect(status().isBadGateway()).andExpect(jsonPath("$.code").value("INVALID_LOKI_RESPONSE"));
         }
         payload.set(good);code.set(500);mvc.perform(volumeRequest()).andExpect(status().isBadGateway());
