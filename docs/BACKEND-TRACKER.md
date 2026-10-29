@@ -1,6 +1,6 @@
 # SentriX 백엔드 개발 현황 및 문제 해결 기록
 
-최종 갱신: 2026-10-28 · 기준 저장소: `seNNTRIX/sentrix-core`
+최종 갱신: 2026-10-29 · 기준 저장소: `seNNTRIX/sentrix-core`
 
 이 문서는 **앞으로 할 일, 완료한 일, 개발 중 발견한 문제와 해결 근거**를 관리하는 기준 문서다. 기존 상세 개발 이력은 [DEVELOPMENT.md](DEVELOPMENT.md), 실행 방법과 현재 API 계약은 [README](../README.md)에 보존한다.
 
@@ -9,7 +9,7 @@
 - Java 21 / Spring Boot / MySQL 8.4 기반으로 환경·관측 저장소 설정을 저장한다.
 - Prometheus 메트릭·Deployment 준비 상태, Loki 로그, Tempo 트레이스를 조회하는 **20개 API operation을 구현**했다. 서비스 맵과 분석 실행 설정의 전체 범위는 아직 진행 중이다.
 - Swagger에서 구현된 20개 API operation을 한국어 설명과 함께 직접 호출할 수 있다(BE-16 완료).
-- 대시보드의 기존 디자인에 실제 조회 결과를 연결했다. 원본 관측 데이터는 MySQL에 복제하지 않는다.
+- 현재 구현된 20개 operation 모두 대시보드 호출 경로 연결 완료. 단일 trace 호출 관계·수집 최신성·환경 상세·health 포함. 전체 제품 기능 완료와는 구분한다. 원본 관측 데이터는 MySQL에 복제하지 않는다.
 - 자동 이상 탐지, 장애 이력 저장, Python 모델 호출, RCA 결과 저장은 **아직 구현 전**이다. 현재 준비 상태 조회는 ML 장애 판정이 아니다.
 - 아래 완료 표시는 현재 로컬 코드와 기존 검증 기록 기준이다. 커밋·푸시·배포 완료를 뜻하지 않는다. 테스트 실행 여부와 범위는 아래 날짜별 작업 기록을 기준으로 확인한다.
 
@@ -150,6 +150,7 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 | ISS-10 | 관찰 중 | BE-06, API-14 | 실제 Tempo 최신 검색에서 completedJobs가 totalJobs보다 작은 응답 관측 | 최신 검색의 조기 종료인지 누락인지 현재 응답만으로 확정하지 않음 | 시각은 제공하되 PARTIAL/UNKNOWN, UPSTREAM_PARTIAL로 보수적으로 표시; 부분 검색 테스트 통과 | Tempo 검색 완료 의미·부하 조건 확인 후 판정 개선 |
 | ISS-12 | 해결 | BE-16, API-18 | 로그 집계 Swagger 예시에 Pod 메트릭 필드가 표시됨 | 두 컨트롤러의 Result 타입 이름이 OpenAPI에서 충돌 | LogVolumeResult로 구분, 실제 스키마와 OpenApiTests 필드 검증 추가 | 신규 응답 스키마 이름 충돌 검사 유지 |
 | ISS-13 | 해결 | API-18, 프론트 | 임의 초 조회 시 Loki가 분 경계로 반환하여 502 발생 | query_range step 자동 정렬 확인 | 서버는 epoch 버킷 경계만 허용, 프론트는 선택 범위 안의 완성 구간 조회 | 다른 Loki 설정·버전 적용 시 정렬 계약 확인 |
+| ISS-14 | 해결 | API-14/15, 프론트 | 수집 조회 최대 30초와 프론트 기본 20초 제한 불일치; 실제 그래프 선·노드 위치 불일치 | 순차 저장소 조회 계약과 기존 graph-canvas의 강제 min-height 594px 확인 | 최신성 요청만 35초 제한 적용; 실제 그래프 전용 캔버스 좌표 사용 | 부하·대규모 그래프 검증 미실행 |
 
 새 문제의 상세 기록 양식:
 
@@ -320,3 +321,15 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 - [x] 프론트 테스트 15개·production build 통과. 실제 Java/MySQL/Prometheus 브라우저 연동에서 frontend와 productcatalogservice의 서로 다른 UID, Ready·재시작·CPU·메모리 확인. 서비스 전환·Pod 새로고침 검증.
 - 표의 값은 관측된 컨테이너 합계의 마지막 지점이다. 현재 상태나 전체 수집 완전성을 보장하지 않는다. Ready false/미확인 및 재시작 0/미확인을 구분한다.
 - Java API·MySQL 스키마 변경 없음. 모바일·여러 Pod 선택·Pod 재생성 실험·부하 테스트 미실행. 기존 번들 크기 경고 유지. ML/RCA·전체 서비스 맵·수집 상태 화면 등 남은 연결은 미완료다.
+
+
+### 2026-10-29 — 구현된 API 전체 프론트 연결
+
+- [x] API-14 서비스 상세 수집 최신성: 대표 지표·요청 지표·로그·trace, RECENT/STALE/NO_DATA/UNKNOWN 및 저장소별 부분 응답/오류 표시.
+- [x] API-15 현재 단일 trace 계약 연결: 기존 B2 shell·그래프/상세 패널 구성 유지, 실제 노드·연결·호출 수·ERROR/UNSET·처리 시간. Trace 상세와 왕복 이동. 전체 트래픽 관계 기능/API-15의 전체 설계는 계속 진행 상태다.
+- [x] API-01/04 설정 일반 탭: 환경 상세와 SentriX 백엔드·DB health. 기존 16개 연결과 합쳐 20개 operation의 UI 호출 경로 연결 완료.
+- [x] 프론트 테스트 19개·production build 통과. 실제 서비스 최신성에서 Tempo 일부 응답 UNKNOWN 표시, 실제 상품 조회 trace에서 3개 서비스·2개 연결·6개 span 왕복 이동 확인. 환경 상세·health UP 확인, 검증 탭 오류 로그 없음.
+- ISS-14 해결. 서비스 이름과 Deployment 일치가 확인될 때만 상세 링크 제공. 60개 초과 서비스는 연결 표로 조회하고 그래프는 생략한다.
+- 로컬 쇼핑몰 홈 조회 1건이 20초 안에 완료되지 않아 기존에 저장된 실제 상품 조회 trace로 검증했다. 해당 타임아웃의 원인은 이번 범위에서 확정하지 않았고 프론트 성공 응답으로 숨기지 않았다.
+- Java/DB 스키마 변경 없음. 저장 API 전부 재실행·모바일·장시간 부하·ML 연동 미검증. 기존 번들 크기 경고 유지. 전체 제품 개발 완료를 뜻하지 않는다.
+- API별 화면 연결 표: sentrix-dashboard/docs/API-CONNECTIONS.md. 백엔드 코드는 sentrix-core, 화면 코드는 sentrix-dashboard에 각각 기록한다.
