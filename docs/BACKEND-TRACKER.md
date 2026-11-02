@@ -68,12 +68,12 @@
 | API-21 | [ ] 진행 | `PUT /api/v1/environments/{id}/monitoring` | 자동 분석 활성화·중지와 사용할 모델 설정 저장 | BE-08, BE-09 |
 | API-22 | [ ] 보류 | `GET /api/v1/environments/{id}/anomaly-scores` | 실제 분석 점수·임계값·판정·모델 버전의 시계열 반환 | BE-10~13, 모델 연동 |
 | API-23 | [ ] 대기 | `GET /api/v1/environments/{id}/service-status/history` | 서비스별 정상·경고·이상·미판정 구간 반환 | BE-12, BE-13, ISS-05 |
-| API-24 | [ ] 대기 | `GET /api/v1/environments/{id}/incidents` | 기간·서비스·상태별 장애 목록 페이지 조회 | BE-13 |
-| API-25 | [ ] 대기 | `GET /api/v1/environments/{id}/incidents/{incidentId}` | 장애 시각·영향 서비스·분석 진행 상태 조회 | BE-13 |
+| API-24 | [x] 수동 기록 범위 | `GET /api/v1/environments/{id}/incidents` | 기간·서비스·상태별 장애 목록 페이지 조회 | BE-13 |
+| API-25 | [x] 수동 기록 범위 | `GET /api/v1/environments/{id}/incidents/{incidentId}` | 장애 시각·영향 서비스·분석 진행 상태 조회 | BE-13 |
 | API-26 | [ ] 대기 | `POST /api/v1/environments/{id}/incidents/{incidentId}/acknowledgements` | 사용자 확인 기록 저장; 자동 회복 판정과 구분 | BE-13, 사용자 식별 방식 |
 | API-27 | [ ] 보류 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca` | 원인 서비스·연결 순위, 근거, 중간·최종 결과 반환 | BE-11~13, 모델 연동 |
-| API-28 | [ ] 대기 | `POST /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs` | 분석·재분석 작업 접수; 중복 실행과 미연결 모델 처리 | BE-08, BE-11, BE-13 |
-| API-29 | [ ] 대기 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs/{jobId}` | 대기·실행·완료·실패와 관련 결과 조회 | BE-13 |
+| API-28 | [ ] 진행: 미연결 요청 저장 | `POST /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs` | 분석·재분석 작업 접수; 중복 실행과 미연결 모델 처리 | BE-08, BE-11, BE-13 |
+| API-29 | [ ] 진행: 대기·취소 조회 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs/{jobId}` | 대기·실행·완료·실패와 관련 결과 조회 | BE-13 |
 | API-30 | [ ] 대기 | `GET /api/v1/environments/{id}/events/stream` | 장애·점수·RCA 결과 갱신을 SSE로 전달 | BE-15; 초기에는 주기 조회로 대체 가능 |
 
 목록·저장 구조·실패 처리는 모델 완성 전 개발할 수 있다. 시험용 모델 응답은 테스트 안에서만 사용하고 실제 화면의 판정으로 노출하지 않는다.
@@ -89,6 +89,10 @@
 | API-35 | [ ] 후속 | `GET /api/v1/models/{modelId}/evaluations` | 평가 데이터셋·지표·평가 조건 조회 | 팀원이 만든 평가 결과를 등록·조회; 온라인 자동 평가와 구분 |
 | API-36 | [ ] 후속 | `GET /api/v1/notifications` | 사용자 알림 목록 조회 | 장애 알림 범위 확정 후 구현 |
 | API-37 | [ ] 후속 | `PATCH /api/v1/notifications/{notificationId}` | 알림 읽음 상태 변경 | API-36 |
+| API-38 | [x] 완료 | `POST /api/v1/environments/{id}/incidents` | 수동 장애 기록; requestKey 중복 방지 | BE-13 |
+| API-39 | [x] 완료 | `PATCH /api/v1/environments/{id}/incidents/{incidentId}` | 수동 종료·재개, 종료 시 대기 작업 취소 | BE-13 |
+| API-40 | [x] 완료 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs` | 분석 요청 이력 페이지 조회 | BE-13 |
+| API-41 | [x] 완료 | `POST /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs/{jobId}/cancel` | 미연결 대기 요청 취소 | BE-13 |
 
 회원가입·비밀번호 재설정·팀 초대·알림 규칙·감사 이력·환경 삭제는 필요 시 세부 계약을 정한다. 화면에 존재한다는 이유만으로 이번 졸작 시연의 필수 범위로 확정하지 않는다. 부하 생성·장애 주입은 우선 별도 데모 도구로 실행하며, 제품이 계속 관측하는 기능과 분리한다.
 
@@ -108,7 +112,7 @@
 | BE-10 | [ ] 대기 | 분석용 시간 구간 데이터 준비 | 수집 지연을 고려한 구간 정렬, 중복·누락 처리, 학습과 동일한 feature 입력 보장 | Python과 역할 분담; 화면 검색 상한 재사용 금지 |
 | BE-11 | [ ] 보류 | Python 모델 호출·응답 검증 | 버전 확인, timeout·실패·재시도·취소 처리, 응답 작업 ID/환경 검증 | 계약 먼저 개발 가능; 실제 검증은 모델 필요 |
 | BE-12 | [ ] 대기 | 이상·회복·RCA 진행 상태 관리 | 연속 조건·baseline·시작/종료 기준, 중간/최종 순위 구분, 결측 시 미판정 | 모델팀 기준 확인; 알고리즘을 Java에서 중복 구현하지 않음 |
-| BE-13 | [ ] 대기 | 장애·분석·결과 MySQL 저장 | 작업·점수·상태 구간·순위·근거·모델 버전 migration, 트랜잭션, 중복 저장 방지, 조회 인덱스 | API-20~29 |
+| BE-13 | [ ] 진행 | 장애·분석·결과 MySQL 저장 | 작업·점수·상태 구간·순위·근거·모델 버전 migration, 트랜잭션, 중복 저장 방지, 조회 인덱스 | API-20~29 |
 | BE-14 | [ ] 대기 | 재시작·실패 복구 | 실행 중 서버 종료, 모델 지연/중단, 저장 실패, 재시도에도 중복 장애·순위 생성 방지 | BE-09~13 |
 | BE-15 | [ ] 대기 | 화면 갱신과 이벤트 전달 | 초기 조회, SSE 재접속·누락 후 재조회, 연결 정리, 환경 전환 격리 | API-30; 초기 polling 가능 |
 | BE-16 | [x] 완료 | Swagger / OpenAPI 문서 | 구현 API의 입력·응답·오류·호출 예시를 실제 서버에서 확인 | springdoc 3.2.0, OpenApiTests, 실제 Swagger 호출; ISS-09 |
@@ -333,3 +337,14 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 - 로컬 쇼핑몰 홈 조회 1건이 20초 안에 완료되지 않아 기존에 저장된 실제 상품 조회 trace로 검증했다. 해당 타임아웃의 원인은 이번 범위에서 확정하지 않았고 프론트 성공 응답으로 숨기지 않았다.
 - Java/DB 스키마 변경 없음. 저장 API 전부 재실행·모바일·장시간 부하·ML 연동 미검증. 기존 번들 크기 경고 유지. 전체 제품 개발 완료를 뜻하지 않는다.
 - API별 화면 연결 표: sentrix-dashboard/docs/API-CONNECTIONS.md. 백엔드 코드는 sentrix-core, 화면 코드는 sentrix-dashboard에 각각 기록한다.
+
+
+### 2026-11-02 — 모델 없는 장애 기록·분석 요청 상태 관리
+
+- V4 incidents/analysis_jobs, 환경별 수동 기록과 요청 UUID 중복 방지. 환경/장애 행 잠금으로 등록·종료·요청 생성을 직렬화한다. API 8개 추가, 총 28 operation.
+- API-24/25 완료 범위는 MANUAL 기록 목록·상세다. 자동 탐지·영향 서비스 추론·RCA 결과는 미구현이다. API-28/29는 BLOCKED_MODEL_UNAVAILABLE/CANCELLED와 사유·시각만 지원하며 실행/성공/실패 worker는 후속이다. BE-13의 점수·근거·모델 버전 저장은 미완료.
+- 동일 requestKey 재전송은 기존 기록 반환, 내용 충돌 409. 열린 기록당 대기 작업 1개, 다른 키 중복 409. 종료 시 대기 작업은 INCIDENT_RESOLVED로 취소. 취소된 키 재전송은 새 작업을 만들지 않는다.
+- Java 21 전체 55개 테스트·빌드 통과, 프론트 20개 테스트·빌드 통과. 실제 MySQL V4 migration 적용, 대시보드에서 수동 등록→상세→작업 요청→취소→재요청→수동 종료에 따른 취소→작업 상세 사유 확인 완료.
+- Online Boutique 환경에 '[기능 검증]' 제목과 실제 장애 아님을 명시한 수동 종료 기록 1건을 남겼다. 관측 저장소/자동 탐지 검증과 구분한다.
+- 실행 중 Docker 중지와 로컬 서버 접근 제한이 확인되어 Docker 및 허용된 Java/Vite 서버를 기동했다. 기존 DB/볼륨 보존. MySQL 전용 전체 테스트·동시 부하·모바일·ML 실행 미검증. 기존 프론트 번들 크기 경고 유지.
+- 인증/사용자별 접근 권한은 기존 미구현 상태이며 환경 ID 검증은 사용자 권한 검증을 대신하지 않는다. 모델 연결 후 대기 작업 자동 실행도 미구현이다.

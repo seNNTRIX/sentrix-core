@@ -439,3 +439,27 @@ CPU는 1분 rate의 cores, 메모리는 working set bytes다. 각 평가 시점�
 - 반환: 환경·namespace·service, 조회 조건, `dataStatus`, `warnings`, `buckets[{from,to,count}]`. Loki가 반환한 0은 0, 없는 버킷은 null. 모두 없으면 NO_DATA, 일부 없거나 저장소 경고가 있으면 PARTIAL. 집계 실패는 502/504이며 빈 목록으로 숨기지 않는다.
 - `COLLECTION_COMPLETENESS_UNKNOWN`: 저장된 로그 기준이며 수집 누락 여부는 알 수 없다. AVAILABLE도 수집 완전성이나 서비스 정상 판정이 아니다. 건수는 로그 행 수로 요청·에러·장애 건수가 아니며, 심각도 자동 분류 및 수집 중복 제거는 하지 않는다.
 - 근거: [Loki HTTP API](https://grafana.com/docs/loki/latest/reference/loki-http-api/), [LogQL 집계 예시](https://grafana.com/docs/loki/latest/query/query_examples/), [range iterator 경계 구현](https://github.com/grafana/loki/blob/main/pkg/logql/range_vector.go).
+
+
+## 장애 기록과 분석 요청 (2026-11-02)
+
+아래 경로의 `E`는 `/api/v1/environments/{environmentId}`이다. Swagger의 `07. 장애 기록과 분석 작업`에서 호출할 수 있다.
+
+| Method | Path | 기능 |
+|---|---|---|
+| POST | E/incidents | 수동 기록 등록 |
+| GET | E/incidents | 기간·서비스·상태 필터 목록 |
+| GET | E/incidents/{incidentId} | 상세 |
+| PATCH | E/incidents/{incidentId} | OPEN/RESOLVED 수동 변경 |
+| POST | E/incidents/{incidentId}/rca-jobs | 분석 요청을 모델 미연결 상태로 저장 |
+| GET | E/incidents/{incidentId}/rca-jobs | 요청 이력 목록 |
+| GET | E/incidents/{incidentId}/rca-jobs/{jobId} | 작업 상태·사유 |
+| POST | E/incidents/{incidentId}/rca-jobs/{jobId}/cancel | 대기 요청 취소 |
+
+등록 body: `requestKey` UUID, `service`(253자 이하 소문자 영숫자/점/하이픈), `title`(1~200자), `description`(0~2000자), `occurredAt`(미래가 아닌 ISO-8601 시각). source는 MANUAL이며 서비스 존재나 장애 여부를 판정하지 않는다. 시각은 마이크로초 단위 저장.
+
+목록: page=0, size=20(최대 50), service/status/from/to 선택. from 포함/to 제외, 발생 시각 내림차순. 작업 목록도 page/size 지원. 상세 PATCH body는 `{"status":"RESOLVED"}` 또는 OPEN. 종료는 자동 회복 판정이 아니며 대기 작업을 취소한다. 재개는 기존 작업을 재실행하지 않는다.
+
+작업 생성 body는 `{"requestKey":"UUID"}`. 동일 키 재전송은 취소 후에도 동일 작업 반환. 다른 키로 대기 작업 중복 요청/종료 기록 요청은 409. 기록 등록의 같은 키·다른 내용도 409. 환경·장애·작업 소속 불일치는 404.
+
+현재 작업 상태는 BLOCKED_MODEL_UNAVAILABLE 또는 CANCELLED뿐이다. 사유는 MODEL_UNAVAILABLE, USER_CANCELLED, INCIDENT_RESOLVED. 실행 worker·자동 재시도·모델 연결 후 자동 실행·성공/실패 결과는 아직 제공하지 않는다. V4 migration으로 MySQL에 저장한다.
