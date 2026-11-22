@@ -2,16 +2,16 @@
 
 **개발 진행·완료 체크·문제 해결 기록:** [백엔드 작업 현황표](docs/BACKEND-TRACKER.md). 개발할 때 관련 작업 상태와 검증 결과를 함께 갱신합니다. 과거 상세 이력은 [DEVELOPMENT.md](docs/DEVELOPMENT.md)에 보존합니다.
 
-SentriX의 Java 21 / Spring Boot 4.1.2 백엔드. 환경·데이터 소스 설정은 MySQL 8.4에 저장합니다. ML 진단 결과 저장은 후속 개발 대상입니다.
+SentriX의 Java 21 / Spring Boot 4.1.2 백엔드. 환경·데이터 소스 설정은 MySQL 8.4에 저장합니다. 수동 장애 이력·분석 작업과 검증된 모델 응답을 저장하는 구조를 제공합니다. 실제 ML 모델은 아직 미연결입니다.
 
 목표 흐름:
 
 ```text
-Prometheus / Tempo / Loki -> query -> window -> Python features/model-server
-    -> diagnosis 저장(MySQL) -> dashboard API
+Java: 환경·고정 window·작업 관리 -> Python 분석 서버(전용 원본조회 + 공유 features + 모델)
+    -> 검증된 응답 저장(MySQL) -> dashboard API
 ```
 
-대상은 Online Boutique on k3s입니다. 30초 window와 node/edge feature는 수집·학습 측 계약에 맞추며, Python `sentrix-features`와 같은 버전을 사용하는 분석 서버로 연계할 예정입니다. Java에서 별도의 feature 구현을 만들어 학습과 달라지게 하지 않습니다.
+대상은 Online Boutique on k3s입니다. 30초 window와 node/edge feature는 수집·학습 측 계약에 맞추며, Python 학습·추론에서 같은 feature 구현과 버전을 사용하는 분석 서버로 연계할 예정입니다. 공유 라이브러리와 온라인 데이터 조회는 아직 구현·합의 전이며 [분석 계약 초안](docs/ANALYSIS-CONTRACT.md)을 기준으로 조율합니다. Java에서 별도의 feature 구현을 만들어 학습과 달라지게 하지 않습니다.
 
 ## 현재 구현
 
@@ -23,7 +23,7 @@ Prometheus / Tempo / Loki -> query -> window -> Python features/model-server
 - 애플리케이션 및 DB 연결 상태 확인
 - API 통합 테스트 및 MySQL 8.4 CI 설정
 
-환경 등록은 이름과 Kubernetes namespace를 저장합니다. 등록만으로 수집기가 설치되거나 관측 연결이 완료되지는 않습니다. 메트릭 조회는 아래의 수집 지표 계약을 사용합니다. 메트릭·준비 상태·로그·트레이스 조회와 dashboard 연결을 구현했습니다. topology, 모델 호출, 진단 저장, 사용자 인증은 아직 구현 전입니다.
+환경 등록은 이름과 Kubernetes namespace를 저장합니다. 등록만으로 수집기가 설치되거나 관측 연결이 완료되지는 않습니다. 메트릭 조회는 아래의 수집 지표 계약을 사용합니다. 메트릭·준비 상태·로그·트레이스 조회와 dashboard 연결을 구현했습니다. 단일 trace 서비스 맵과 수동 분석 작업 실행·결과 저장 구조까지 구현했습니다. 전체 트래픽 topology, 실제 모델 연결, 자동 탐지·회복, 사용자 인증은 남아 있습니다.
 
 ## 로컬 실행
 
@@ -64,7 +64,7 @@ MySQL 데이터는 Compose의 `mysql-data` 볼륨에 남습니다. `docker compo
 3. 해당 ID로 서비스 목록·메트릭·로그·요청 추적 API를 호출합니다. 시간 조회에는 저장소에 데이터가 있는 최근 UTC 시각을 사용합니다.
 4. **Server response**가 실제 호출 결과입니다. 문서의 **Example Value**는 응답 형식 예시이며 실제 관측값이 아닙니다. POST/PUT의 Execute는 실제 설정을 저장하거나 연결 검사를 실행합니다.
 
-현재 구현한 20개 API만 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
+현재 구현한 29개 API를 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
 
 Spring Boot 4용 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 사용합니다. 참고: [공식 시작 문서](https://springdoc.org/#getting-started), [호환성 안내](https://springdoc.org/faq.html).
 
@@ -401,7 +401,7 @@ Loki는 namespace와 Deployment를 고정하고 최신 로그 한 건의 이벤�
 
 - `GET /api/v1/environments/{id}/monitoring`: 저장된 설정 조회. 미설정 기본값은 enabled=false, intervalSeconds=60.
 - `PUT /api/v1/environments/{id}/monitoring`: `{ "enabled": true, "intervalSeconds": 60 }` 저장. 두 필드 필수, 간격 30~3600초. 환경 없음 404, 입력 오류 400.
-- enabled는 사용자의 실행 의도다. 모델 미연결이므로 true일 때 실행 상태는 BLOCKED_MODEL_UNAVAILABLE, false는 DISABLED다. lastSuccessfulAt은 null이다. 실제 스케줄러·추론·장애 생성은 구현 전이며 성공을 꾸미지 않는다.
+- enabled는 사용자의 실행 의도다. 모델 미연결이므로 true일 때 실행 상태는 BLOCKED_MODEL_UNAVAILABLE, false는 DISABLED다. lastSuccessfulAt은 null이다. 환경 주기 분석·자동 장애 생성은 구현 전이다. 수동으로 접수한 분석 작업을 실행하는 worker와 별개이며, 현재 monitoring 응답은 실제 모델 연결 상태를 검사하지 않는 기존 계약이다.
 - V3 migration으로 설정을 MySQL에 저장한다. 최초 동시 저장은 환경 행 잠금으로 직렬화한다.
 
 ## Deployment 소속 Pod 목록
@@ -441,7 +441,7 @@ CPU는 1분 rate의 cores, 메모리는 working set bytes다. 각 평가 시점�
 - 근거: [Loki HTTP API](https://grafana.com/docs/loki/latest/reference/loki-http-api/), [LogQL 집계 예시](https://grafana.com/docs/loki/latest/query/query_examples/), [range iterator 경계 구현](https://github.com/grafana/loki/blob/main/pkg/logql/range_vector.go).
 
 
-## 장애 기록과 분석 요청 (2026-11-02)
+## 장애 기록과 분석 요청 (2026-11-22)
 
 아래 경로의 `E`는 `/api/v1/environments/{environmentId}`이다. Swagger의 `07. 장애 기록과 분석 작업`에서 호출할 수 있다.
 
@@ -451,15 +451,45 @@ CPU는 1분 rate의 cores, 메모리는 working set bytes다. 각 평가 시점�
 | GET | E/incidents | 기간·서비스·상태 필터 목록 |
 | GET | E/incidents/{incidentId} | 상세 |
 | PATCH | E/incidents/{incidentId} | OPEN/RESOLVED 수동 변경 |
-| POST | E/incidents/{incidentId}/rca-jobs | 분석 요청을 모델 미연결 상태로 저장 |
+| POST | E/incidents/{incidentId}/rca-jobs | 고정된 30초 구간으로 분석 요청 접수 |
 | GET | E/incidents/{incidentId}/rca-jobs | 요청 이력 목록 |
 | GET | E/incidents/{incidentId}/rca-jobs/{jobId} | 작업 상태·사유 |
-| POST | E/incidents/{incidentId}/rca-jobs/{jobId}/cancel | 대기 요청 취소 |
+| POST | E/incidents/{incidentId}/rca-jobs/{jobId}/cancel | 미연결·대기·실행 중 요청 취소 |
+| GET | E/incidents/{incidentId}/rca-jobs/{jobId}/result | 검증 후 저장된 성공 작업 결과 조회 |
 
 등록 body: `requestKey` UUID, `service`(253자 이하 소문자 영숫자/점/하이픈), `title`(1~200자), `description`(0~2000자), `occurredAt`(미래가 아닌 ISO-8601 시각). source는 MANUAL이며 서비스 존재나 장애 여부를 판정하지 않는다. 시각은 마이크로초 단위 저장.
 
-목록: page=0, size=20(최대 50), service/status/from/to 선택. from 포함/to 제외, 발생 시각 내림차순. 작업 목록도 page/size 지원. 상세 PATCH body는 `{"status":"RESOLVED"}` 또는 OPEN. 종료는 자동 회복 판정이 아니며 대기 작업을 취소한다. 재개는 기존 작업을 재실행하지 않는다.
+목록: page=0, size=20(최대 50), service/status/from/to 선택. from 포함/to 제외, 발생 시각 내림차순. 작업 목록도 page/size 지원. 상세 PATCH body는 `{"status":"RESOLVED"}` 또는 OPEN. 종료는 자동 회복 판정이 아니며 미연결·대기·실행 중 작업을 취소한다. 재개는 기존 작업을 재실행하지 않는다.
 
-작업 생성 body는 `{"requestKey":"UUID"}`. 동일 키 재전송은 취소 후에도 동일 작업 반환. 다른 키로 대기 작업 중복 요청/종료 기록 요청은 409. 기록 등록의 같은 키·다른 내용도 409. 환경·장애·작업 소속 불일치는 404.
+작업 생성 body는 `{"requestKey":"UUID"}`이며 선택 필드 `windowEnd`를 지원한다. 기본값은 장애 `occurredAt`이 속한 Unix epoch 기준 30초 구간의 끝이다. 예를 들어 12:00:42 발생 기록은 `[12:00:30,12:01:00)`을 사용한다. 직접 지정하는 끝 시각은 UTC 초 단위의 10초 배수, `1970-01-01T00:00:30Z` 이상이고 현재보다 미래가 아니어야 한다. 구간 폭은 항상 30초이며 수집 지연을 위해 끝 시각 이후 30초부터 실행한다. 이 대기 시간은 초기 운영 정책이며 수집 완전성 보장이 아니다.
 
-현재 작업 상태는 BLOCKED_MODEL_UNAVAILABLE 또는 CANCELLED뿐이다. 사유는 MODEL_UNAVAILABLE, USER_CANCELLED, INCIDENT_RESOLVED. 실행 worker·자동 재시도·모델 연결 후 자동 실행·성공/실패 결과는 아직 제공하지 않는다. V4 migration으로 MySQL에 저장한다.
+동일 키 재전송은 취소 후에도 같은 작업을 반환한다. 같은 키로 다른 명시적 windowEnd, 다른 키로 활성 작업 중복 요청, 종료 기록에 새 작업 요청은 409다. 기록 등록의 같은 키·다른 내용도 409. 환경·장애·작업 소속 불일치는 404다.
+
+V5 migration은 기존 기록을 보존하고 분석 구간·namespace·계약/feature/모델 버전·요청 JSON·실행/종료 시각·결과 JSON을 추가한다. 과거 작업의 새 메타데이터는 null이다.
+
+| 상태 | 의미 |
+|---|---|
+| BLOCKED_MODEL_UNAVAILABLE | 기본 설정. 모델 호출 없음. 연결 후에도 이 작업을 자동 재실행하지 않음 |
+| QUEUED | 운영자가 분석 연결을 활성화한 뒤 받은 새 요청. readyAt 이후 실행 대상 |
+| RUNNING | 한 실행기가 선점해 Python에 요청 중 |
+| SUCCEEDED | 식별자·구간·버전·결과 형식 검증을 통과해 저장함. 정상/이상/판정 보류 여부는 decision으로 구분 |
+| FAILED | HTTP/timeout/응답 검증 실패, 설정 버전 변경, 실행 제한 시간 만료 등 |
+| CANCELLED | 사용자 취소 또는 수동 장애 종료. 늦게 온 응답은 저장하지 않음 |
+
+worker는 1초 간격으로 작업을 하나씩 확인한다. HTTP 호출 중 DB 트랜잭션을 유지하지 않으며, 동시 선점과 취소 후 결과 저장은 조건부 UPDATE로 방지한다. timeout+30초의 실행 유효 시간이 만료된 작업은 다음 확인에서 WORKER_INTERRUPTED로 실패 처리한다. 자동 재시도는 없고 다시 요청하려면 새 requestKey를 쓴다. 원격 Python 계산 자체의 중단은 보장하지 않는다. 저장 중 DB 장애가 나면 실행 유효 시간 만료 후 실패 처리하며 결과를 복구해 재저장하지 않는다.
+
+성공 작업의 `/result`만 결과를 반환한다. 나머지 상태는 `409 ANALYSIS_RESULT_NOT_AVAILABLE`. `ANOMALY`에는 NODE/EDGE 후보·근거, `NORMAL`에는 빈 후보, `ABSTAIN`에는 판정 보류 사유가 있다. 점수는 유한한 수치이며 확률이나 0~1 범위로 해석하지 않는다. 모델 검증은 테스트 서버로만 수행했으며 실제 추론 성능 검증은 포함하지 않는다.
+
+### 분석 서버 연결 설정
+
+현재 기본 설정을 유지하면 실제 호출은 발생하지 않는다. 모델팀이 [계약 초안](docs/ANALYSIS-CONTRACT.md)을 구현하고 feature·baseline 정책을 확정한 뒤 운영자가 아래 값을 설정한다. 사용자 API로 모델 주소를 변경할 수 없다.
+
+| 환경변수 | 기본값 / 의미 |
+|---|---|
+| SENTRIX_ANALYSIS_ENABLED | false. 수동 분석 실행 활성화 |
+| SENTRIX_ANALYSIS_BASE_URL | 빈 값. Python 서버 주소, 요청 경로는 `/v1/analyses` |
+| SENTRIX_ANALYSIS_MODEL_VERSION | 빈 값. 고정 모델 버전 |
+| SENTRIX_ANALYSIS_FEATURE_SCHEMA_VERSION | 빈 값. 학습과 동일한 feature 버전 |
+| SENTRIX_ANALYSIS_TIMEOUT_SECONDS | 10. 전체 본문 수신까지 제한, 허용 1~60초 |
+
+활성화에는 주소·두 버전이 모두 필요하다. redirect 금지, 응답 최대 1MiB. 각 작업의 버전은 생성 시 고정하며 실행 전에 설정이 달라졌으면 실패 처리한다. 여러 Java 인스턴스를 사용할 경우 같은 분석 설정과 DB를 사용해야 한다. endpoint의 보안·인증 연결은 내부의 통제된 개발 환경 범위이며 공개 서비스 운영 준비는 별도다.
