@@ -15,12 +15,12 @@ import org.springframework.web.bind.annotation.*;
 class AnalysisJobController {
     private final AnalysisJobs jobs;
     AnalysisJobController(AnalysisJobs jobs) { this.jobs=jobs; }
-    record JobInput(@NotNull UUID requestKey, Instant windowEnd) {}
+    record JobInput(@NotNull UUID requestKey, Instant windowEnd, Boolean latest) {}
 
-    @Operation(summary="RCA 분석 요청 접수", description="기본은 모델 미연결 대기입니다. 운영자가 계약·모델·feature 버전을 설정한 경우 새 요청만 실행 큐에 넣습니다. windowEnd 생략 시 장애 발생 시각이 속한 UTC 30초 구간을 고정합니다. 직접 지정하면 과거의 10초 격자 끝 시각이어야 합니다. 수집 대기 30초 후 실행합니다. 동일 키 재전송은 기존 작업, 다른 구간은 409입니다. 장애당 활성 작업 하나만 허용합니다.")
+    @Operation(summary="RCA 분석 요청 접수", description="기본은 모델 미연결 대기입니다. 운영자가 계약·모델·feature 버전을 설정한 경우 새 요청만 실행 큐에 넣습니다. windowEnd 생략 시 장애 발생 시각이 속한 UTC 30초 구간을 고정합니다. latest=true이면 서버 시각 기준 직전 10초 경계에서 끝나는 최근 30초를 고정합니다. windowEnd와 latest=true는 동시에 지정할 수 없습니다. 직접 지정하면 과거의 10초 격자 끝 시각이어야 합니다. 수집 대기 30초 후 실행합니다. 동일 키 재전송은 기존 작업, 다른 구간은 409입니다. 장애당 활성 작업 하나만 허용합니다.")
     @PostMapping
     AnalysisJobs.Job create(@PathVariable Long environmentId,@PathVariable UUID incidentId,@Valid @RequestBody JobInput input) {
-        return jobs.create(environmentId,incidentId,input.requestKey(),input.windowEnd());
+        return jobs.create(environmentId,incidentId,input.requestKey(),input.windowEnd(),Boolean.TRUE.equals(input.latest()));
     }
     @Operation(summary="장애별 분석 작업 이력", description="미연결 대기·실행 대기·실행 중·성공·실패·취소 이력을 최근 요청부터 조회합니다. 기본 모델은 미연결입니다.")
     @GetMapping
@@ -37,7 +37,7 @@ class AnalysisJobController {
     AnalysisJobs.Job cancel(@PathVariable Long environmentId,@PathVariable UUID incidentId,@PathVariable UUID jobId) {
         return jobs.cancel(environmentId,incidentId,jobId);
     }
-    @Operation(summary="분석 작업 결과 조회", description="검증을 통과해 저장된 성공 작업의 응답만 반환합니다. 성공은 요청 처리 성공이며 장애 발생 판정과 다릅니다. decision은 ANOMALY/NORMAL/ABSTAIN이며 score를 확률로 해석하지 않습니다. 미완료·실패·취소·미연결 작업은 409입니다. 현재 실제 모델 미연결입니다.")
+    @Operation(summary="분석 작업 결과 조회", description="검증을 통과해 저장된 성공 작업의 응답만 반환합니다. 성공은 요청 처리 성공이며 장애 발생 판정과 다릅니다. decision은 ANOMALY/NORMAL/ABSTAIN이며 score를 확률로 해석하지 않습니다. 미완료·실패·취소·미연결 작업은 409입니다. 판정 보류에도 실제 원시 점수가 포함될 수 있습니다.")
     @GetMapping("/{jobId}/result")
     AnalysisProtocol.Response result(@PathVariable Long environmentId,@PathVariable UUID incidentId,@PathVariable UUID jobId) {
         return jobs.result(environmentId,incidentId,jobId);

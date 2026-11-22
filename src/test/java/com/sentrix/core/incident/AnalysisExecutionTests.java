@@ -148,6 +148,23 @@ class AnalysisExecutionTests {
     String state(String id) { return db.queryForObject("SELECT status FROM analysis_jobs WHERE id=?", String.class, id); }
 
     @Test
+    void latestWindowIsPinnedByServerAndRetryReturnsTheSameJob() throws Exception {
+        var path = path(incident());
+        var input = json.createObjectNode().put("latest", true).put("requestKey", UUID.randomUUID().toString());
+        long before = Instant.now().getEpochSecond();
+        var result = read(mvc.perform(post(path).contentType("application/json").content(input.toString()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        var end = Instant.parse(result.path("windowEnd").asText());
+        assertThat(end.getEpochSecond()).isBetween(before-9, Instant.now().getEpochSecond());
+        assertThat(end.getEpochSecond() % 10).isZero();
+        assertThat(Instant.parse(result.path("windowStart").asText())).isEqualTo(end.minusSeconds(30));
+        mvc.perform(post(path).contentType("application/json").content(input.toString()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(result.path("id").asText()));
+        input.put("windowEnd", end.toString());
+        mvc.perform(post(path).contentType("application/json").content(input.toString())).andExpect(status().isBadRequest());
+    }
+
+    @Test
     void configuredModelDoesNotClaimAutomaticMonitoring() throws Exception {
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/environments/"+environmentId+"/monitoring")
                 .contentType("application/json").content("{\"enabled\":true,\"intervalSeconds\":60}"))

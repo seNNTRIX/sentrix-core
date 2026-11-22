@@ -56,8 +56,9 @@ public class AnalysisJobs {
     }
 
     @Transactional
-    public Job create(Long environmentId, UUID incidentId, UUID requestKey, Instant requestedEnd) {
+    public Job create(Long environmentId, UUID incidentId, UUID requestKey, Instant requestedEnd, boolean latest) {
         var incident = incident(environmentId,incidentId,true);
+        if (latest && requestedEnd != null) throw error(HttpStatus.BAD_REQUEST,"INVALID_ANALYSIS_WINDOW");
         if (requestedEnd != null && (requestedEnd.getNano() != 0 || requestedEnd.getEpochSecond() % 10 != 0 || requestedEnd.isAfter(Instant.now()) || requestedEnd.isBefore(Instant.parse("1970-01-01T00:00:30Z"))))
             throw error(HttpStatus.BAD_REQUEST,"INVALID_ANALYSIS_WINDOW");
         var prior = db.query(JOIN + " WHERE j.incident_id=? AND j.request_key=?",this::row,incidentId.toString(),requestKey.toString());
@@ -69,7 +70,8 @@ public class AnalysisJobs {
         if (incident.status().equals("RESOLVED")) throw error(HttpStatus.CONFLICT,"INCIDENT_RESOLVED");
         if (db.queryForObject("SELECT COUNT(*) FROM analysis_jobs WHERE incident_id=? AND status IN " + ACTIVE, Long.class,incidentId.toString()) > 0)
             throw error(HttpStatus.CONFLICT,"ACTIVE_ANALYSIS_JOB_EXISTS");
-        // Pin the event's window once; requesting a historical incident must not analyze the current time.
+        // Resolve a relative window only after looking up the idempotency key.
+        if (latest) requestedEnd = Instant.ofEpochSecond(Math.floorDiv(Instant.now().getEpochSecond(),10)*10);
         Instant end = requestedEnd != null ? requestedEnd : Instant.ofEpochSecond(Math.floorDiv(incident.occurredAt().getEpochSecond(),30)*30+30);
         if (end.isBefore(Instant.parse("1970-01-01T00:00:30Z"))) throw error(HttpStatus.BAD_REQUEST,"INVALID_ANALYSIS_WINDOW");
         Instant start = end.minusSeconds(30), ready = end.plusSeconds(30), now = Instant.now();
