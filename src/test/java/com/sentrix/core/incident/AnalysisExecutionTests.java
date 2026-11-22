@@ -148,6 +148,15 @@ class AnalysisExecutionTests {
     String state(String id) { return db.queryForObject("SELECT status FROM analysis_jobs WHERE id=?", String.class, id); }
 
     @Test
+    void configuredModelDoesNotClaimAutomaticMonitoring() throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/v1/environments/"+environmentId+"/monitoring")
+                .contentType("application/json").content("{\"enabled\":true,\"intervalSeconds\":60}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.modelStatus").value("CONFIGURED"))
+                .andExpect(jsonPath("$.executionStatus").value("BLOCKED_AUTOMATIC_ANALYSIS_UNAVAILABLE"));
+        db.update("DELETE FROM monitoring_settings WHERE environment_id=?",environmentId);
+    }
+
+    @Test
     void queuesFixedInputAndSavesValidatedResultWithEnvironmentIsolation() throws Exception {
         String incident = incident();
         String key = UUID.randomUUID().toString();
