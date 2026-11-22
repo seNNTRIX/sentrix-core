@@ -17,7 +17,7 @@ class OpenApiConfig {
         return new OpenAPI().info(new Info().title("SentriX 백엔드 API").version("v1")
                 .description("환경 등록 → 데이터 소스 저장·연결 테스트 → 서비스·메트릭·로그·요청 추적 조회 순서로 사용합니다. "
                         + "Try it out → Execute는 실행 중인 서버에 실제 요청을 보냅니다. POST/PUT은 설정을 저장하거나 검사를 실행합니다. "
-                        + "시간 조회에는 저장소에 데이터가 있는 최근 UTC 구간을 입력하세요. 모델·장애 분석 API는 아직 미구현입니다."))
+                        + "시간 조회에는 저장소에 데이터가 있는 최근 UTC 구간을 입력하세요. 수동 장애 이력·분석 작업 실행 구조를 제공합니다. 실제 모델은 기본 미연결이며 계약 초안 확인 후 연결해야 합니다."))
                 .servers(List.of(new Server().url("/").description("현재 문서를 제공하는 서버")));
     }
 
@@ -57,6 +57,8 @@ class OpenApiConfig {
                             .addApiResponse("502", problem("관측 저장소 연결·응답 오류 또는 응답 크기 제한 초과"))
                             .addApiResponse("503", problem("조회 작업 중단"))
                             .addApiResponse("504", problem("관측 저장소 응답 시간 초과"));
+                } else if (path.contains("/incidents")) {
+                    op.getResponses().addApiResponse("409", problem("요청 키 충돌, 활성 작업 중복, 종료된 장애 또는 저장된 분석 결과 없음"));
                 } else if (method.name().equals("POST") || method.name().equals("PUT")) {
                     op.getResponses().addApiResponse("409", problem("환경 이름 중복 또는 설정 동시 변경 충돌"));
                     if (path.endsWith("/test")) op.getResponses().addApiResponse("503", problem("연결 검사 작업 중단"));

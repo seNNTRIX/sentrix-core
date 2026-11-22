@@ -31,7 +31,8 @@ class OpenApiTests {
                 count++;
             }
         }
-        assertThat(count).isEqualTo(28);
+        assertThat(count).isEqualTo(29);
+        assertThat(paths.path("/api/v1/environments/{environmentId}/incidents/{incidentId}/rca-jobs/{jobId}/result").path("get").path("responses").has("409")).isTrue();
         var volume = paths.path("/api/v1/environments/{environmentId}/logs/volume").path("get");
         String volumeRef = volume.path("responses").path("200").path("content").path("*/*").path("schema").path("$ref").asText();
         assertThat(volumeRef).isEqualTo("#/components/schemas/LogVolumeResult");
