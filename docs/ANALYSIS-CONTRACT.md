@@ -126,3 +126,23 @@ HTTP 200의 JSON 객체이며 요청의 8개 필드를 동일한 값으로 돌�
 - 모델 서버는 준비된 특징값을 주면 실제 추론할 수 있다. 그러나 원본조회·정상 기준선·정상 점수95백분위·2개 연속 판정은 아직 없어 자동 탐지는 제공하지 않는다. 임의 임계값으로 ANOMALY를 만들지 않는다.
 - frozen 모델은 장애 유형을 분류하지 않는다. 원인 서비스 점수와 Edge 규칙 점수는 별도이며 이번에는 Node 추론만 제공한다.
 - `monitoring.modelStatus=CONFIGURED`는 연결 설정 존재를 뜻하며 모델 health 검사가 아니다. 환경 자동 분석이 활성화되어도 BLOCKED_AUTOMATIC_ANALYSIS_UNAVAILABLE로 표시한다.
+
+
+## 온라인 특징 준비 구현 (2026-11-22 후속)
+
+sentrix-model-server의 SENTRIX_TELEMETRY_CONFIG로 환경별 원본 저장소와
+운영자가 확인한5~10분 기준 구간을 지정한다. Python은 화면 API를 사용하지 않고
+Prometheus query_range, Tempo 검색/상세, Loki query_range를 직접 조회한다.
+조회 실패·상한 도달·불완전 검색·부모 누락·비정형 로그·표본 부족은 구체적 ABSTAIN 사유다.
+Java는 이 사유를 그대로 저장한다. HTTP200/작업SUCCEEDED는 품질 성공을 뜻하지 않는다.
+
+공통 계산은 sentrix-features 0.1.0의 frozen 학습 함수와 입력 품질 wrapper를 사용한다.
+학습 원본과 전체 ranking18/detection58 출력 동등성을 테스트한다.
+현재 학습 저장소 import 자체는 전환하지 않았으며 내용·해시 동등성을 검증한 보존 사본이다.
+학습과 온라인환경이 같은 데이터 분포임을 이 테스트만으로 보장하지 않는다.
+
+원본 조회 budget45초(진행 중인 호출은 추가 최대8초), 응답4MiB, trace검색당200개를
+최소15초까지 분할(최대16회), 분석범위trace500개·전체span50000개, 로그5000개 제한이다.
+Java 호출 timeout은60초를 사용한다. 허용 범위를 초과하면 추측한 결과를 만들지 않는다.
+원본 준비와 모델 점수 계산이 성공해도 정상점수95백분위·2구간 연속 판단은 아직 미구현이므로
+ABSTAIN/CALIBRATION_AND_CONSECUTIVE_WINDOWS_REQUIRED가 유지된다.

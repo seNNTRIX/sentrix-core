@@ -514,3 +514,12 @@ export SENTRIX_ANALYSIS_FEATURE_SCHEMA_VERSION=re2ob-v0-rel18-all58
 
 기존 monitoring 설정은 모델 설정 시 `modelStatus=CONFIGURED`를 표시한다. 자동 분석 요청이 켜져 있으면
 `executionStatus=BLOCKED_AUTOMATIC_ANALYSIS_UNAVAILABLE`이며 실제 환경별 주기 실행은 남아 있다.
+
+
+### 온라인 원본 조회 연결
+
+모델 서버의 `SENTRIX_TELEMETRY_CONFIG`에 환경1/namespace sentrix의 실제 Prometheus·Tempo·Loki
+주소와 명시적 정상 기준 구간을 설정한다. 구성 예시는 모델 서버의 telemetry.example.json을 참고한다.
+Java에는 `SENTRIX_ANALYSIS_TIMEOUT_SECONDS=60`을 설정한다. 30초 구간·버전 요청 계약은 같다.
+실시간 feature 준비 시에는 sentrix-features 패키지의 학습 함수 보존 사본을 사용한다.
+품질 실패는 `ABSTAIN`의 구체적 사유로 저장·표시한다. 전체 자동 탐지·실제 RCA 정확도 검증은 후속이다.
