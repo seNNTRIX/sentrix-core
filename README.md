@@ -493,3 +493,24 @@ worker는 1초 간격으로 작업을 하나씩 확인한다. HTTP 호출 중 DB
 | SENTRIX_ANALYSIS_TIMEOUT_SECONDS | 10. 전체 본문 수신까지 제한, 허용 1~60초 |
 
 활성화에는 주소·두 버전이 모두 필요하다. redirect 금지, 응답 최대 1MiB. 각 작업의 버전은 생성 시 고정하며 실행 전에 설정이 달라졌으면 실패 처리한다. 여러 Java 인스턴스를 사용할 경우 같은 분석 설정과 DB를 사용해야 한다. endpoint의 보안·인증 연결은 내부의 통제된 개발 환경 범위이며 공개 서비스 운영 준비는 별도다.
+
+
+## 조직 frozen 모델 연결 (2026-11-22 후속)
+
+실제 모델은 `sentrix-ml/experiments/20261028-re2ob-v2-freeze`에 있다.
+형제 저장소 sentrix-model-server의 README대로 Python 서버를 실행한 뒤 아래 값을 Java 시작 환경에 설정한다.
+
+```sh
+export SENTRIX_ANALYSIS_ENABLED=true
+export SENTRIX_ANALYSIS_BASE_URL=http://127.0.0.1:8000
+export SENTRIX_ANALYSIS_MODEL_VERSION=re2ob-v2-freeze
+export SENTRIX_ANALYSIS_FEATURE_SCHEMA_VERSION=re2ob-v0-rel18-all58
+```
+
+실제 모델 로드 상태는 Python `GET /health`에서 확인한다. 작업 요청은 Python `/v1/analyses`로 전달되고
+온라인 특징 데이터가 없으면 ABSTAIN/FEATURE_INPUT_UNAVAILABLE를 저장한다. 이는 추론 입력 준비 전 상태이며
+모델 원인 판정을 생성하지 않는다. 실제 특징값에 대한 모델 계산은 Python `/v1/score`로 제공한다.
+전체 실시간 RCA를 위해 온라인 원본조회·학습과 동일한 feature·정상 기준값·연속 구간 판정이 필요하다.
+
+기존 monitoring 설정은 모델 설정 시 `modelStatus=CONFIGURED`를 표시한다. 자동 분석 요청이 켜져 있으면
+`executionStatus=BLOCKED_AUTOMATIC_ANALYSIS_UNAVAILABLE`이며 실제 환경별 주기 실행은 남아 있다.

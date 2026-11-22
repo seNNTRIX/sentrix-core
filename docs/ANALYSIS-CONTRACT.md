@@ -5,7 +5,7 @@
 ## 책임과 현재 구현 경계
 
 - Java는 환경·장애·작업 ID와 분석 구간을 고정하고, 작업을 저장한 뒤 Python에 분석을 요청한다. 모델의 원인 순위를 Java가 다시 계산하지 않는다.
-- Python 분석 서버는 운영자가 환경 ID·namespace에 매핑한 관측 저장소에서 **분석 전용 조회**를 수행하고 학습과 동일한 feature 코드를 사용한다. 원본 조회와 feature 계산을 포함해 하나의 요청으로 응답한다는 이 초안의 제안이며, 해당 Python 구현은 아직 없다.
+- Python 분석 서버는 운영자가 환경 ID·namespace에 매핑한 관측 저장소에서 **분석 전용 조회**를 수행하고 학습과 동일한 feature 코드를 사용한다. 원본 조회와 feature 계산을 포함해 하나의 요청으로 응답한다는 이 초안의 제안이며, 2026-11-22 후속 구현으로 sentrix-model-server가 실제 frozen 모델을 로드하고 이 계약을 수신한다. 온라인 전용 조회·특징 생성기는 아직 없다.
 - 요청에 저장소 URL·인증정보·학습 정답·수동 장애 제목을 보내지 않는다. Python의 환경 매핑과 접근 제한은 모델 서버에서 별도로 구현해야 한다.
 - 화면용 `/metrics`, `/logs`, `/traces`는 입력 데이터셋으로 사용하지 않는다. 검색 상한과 집계 정의가 학습용과 다르다.
 - `sentrix-collection`에는 오프라인 export → canonical → RE2 projection 구현이 있다. 공유 feature 패키지, 온라인 정상 기준선, 모델 서버 구현을 이 백엔드 변경이 완성하지는 않는다.
@@ -115,3 +115,14 @@ HTTP 200의 JSON 객체이며 요청의 8개 필드를 동일한 값으로 돌�
 7. 환경별 원본 저장소 매핑, namespace 격리, 요청 중복 처리, 시간·응답 크기 예산. 오프라인 exporter의 실험 trace ID 목록은 온라인 전체 수집을 대체하지 않는다.
 
 위 항목은 이번 Java 프로토콜 구현만으로 검증되지 않는다. 실제 Python 연동 전에 동일 구간을 학습 feature 코드와 온라인 경로로 계산해 일치 여부를 확인해야 한다.
+
+
+## 실제 조직 모델 연결 (2026-11-22 후속)
+
+- 확인 저장소: seNNTRIX/sentrix-ml. 실제 고정 v2 RF rel18/LightGBM all58 아티팩트가 있으며 sentrix-model-server와 sentrix-features는 최초 확인 시 README만 있었다.
+- sentrix-model-server에 실제 아티팩트 해시·의존성·특징 순서 검증, `/health`, `/v1/schema`, `/v1/score`, `/v1/analyses`를 구현했다.
+- 연결 설정은 BASE_URL=http://127.0.0.1:8000, MODEL_VERSION=re2ob-v2-freeze, FEATURE_SCHEMA_VERSION=re2ob-v0-rel18-all58, ENABLED=true다. 마지막 식별자는 서버가 manifest 특징 집합에 부여한 이름이다. 학습 코드 FEATURE_VERSION은 v0이다.
+- metadata 요청은 실시간 특징 데이터가 없어 ABSTAIN/FEATURE_INPUT_UNAVAILABLE를 반환한다. Java는 이를 SUCCEEDED 작업의 판정 보류 결과로 저장한다. SUCCEEDED와 장애 판정은 다르다.
+- 모델 서버는 준비된 특징값을 주면 실제 추론할 수 있다. 그러나 원본조회·정상 기준선·정상 점수95백분위·2개 연속 판정은 아직 없어 자동 탐지는 제공하지 않는다. 임의 임계값으로 ANOMALY를 만들지 않는다.
+- frozen 모델은 장애 유형을 분류하지 않는다. 원인 서비스 점수와 Edge 규칙 점수는 별도이며 이번에는 Node 추론만 제공한다.
+- `monitoring.modelStatus=CONFIGURED`는 연결 설정 존재를 뜻하며 모델 health 검사가 아니다. 환경 자동 분석이 활성화되어도 BLOCKED_AUTOMATIC_ANALYSIS_UNAVAILABLE로 표시한다.

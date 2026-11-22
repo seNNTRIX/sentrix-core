@@ -9,7 +9,7 @@
 - Java 21 / Spring Boot / MySQL 8.4. 구현 API 29개(health 포함), 기존 28개와 분석 작업 결과 조회 1개.
 - 실제 메트릭·로그·trace·Pod·수집 최신성·단일 trace 서비스 맵을 대시보드에 연결했다. 원본 관측 데이터는 MySQL에 복제하지 않는다.
 - 수동 장애 등록·종료·재개, 분석 요청·취소·이력을 저장한다. 수동 분석 worker, 고정 30초 구간, 응답 검증·결과 저장·실패/취소 경합·만료 복구를 추가했다.
-- 실제 모델은 기본 미연결이다. 테스트 응답으로 실행 구조를 검증하며 실제 Python 전용 데이터 조회·feature·모델 성능 검증은 남아 있다. [계약 초안](ANALYSIS-CONTRACT.md)은 팀 합의 완료를 뜻하지 않는다.
+- 실제 frozen 모델 서버 연결을 확인했다. Python의 온라인 전용 데이터 조회·feature·정상 기준선·연속 탐지 및 실제 RCA 성능 검증은 남아 있다. [계약 초안](ANALYSIS-CONTRACT.md)은 팀 합의 완료를 뜻하지 않는다.
 - 환경별 자동 분석 스케줄, 자동 장애 탐지·회복, 전체 트래픽 서비스 맵, 로그인·알림 발송은 미구현이다. 수동 worker와 환경 주기 분석은 다르다.
 - 완료 표시는 해당 범위의 코드·검증 기준이며, 커밋·푸시·배포는 날짜별 작업 기록에서 별도로 확인한다.
 
@@ -370,3 +370,18 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 - 미검증: 실제 Python 모델/feature 일치성, 실제 RCA 정확도, 장시간·다중 인스턴스 부하, 실제 시스템 종료 순간을 주입한 복구 실험. 실행 기한 만료는 자동 테스트로 검증했다. 기존 프론트 번들 크기 경고 유지.
 - 커밋: 프로토콜/클라이언트02ad188, 실행 구조2e135ba, 프론트cd7d07a. 문서 커밋 후 core/main·dashboard/feat/backend-integration에 각각 한 번씩 배치 푸시하고 원격 HEAD 일치를 확인한다. PR 없음.
 - 다음: 모델팀과 ANALYSIS-CONTRACT 초안·feature/정상 기준선 합의, Python 전용 조회·feature 구현 확인 후 실제 모델 연동. 환경 자동 분석 스케줄은 수동 실행기와 별도로 개발한다.
+
+
+### 2026-11-22 — 조직 실제 frozen 모델 서버 연결
+
+- 사용자 지시에 따라 조직 저장소를 조회해 sentrix-ml / sentrix-model-server / sentrix-features를 clone했다. ml의 고정 v2 아티팩트가 실제 존재하고 나머지 두 저장소는 README만 있음을 확인했다. ml·features 소스는 변경하지 않았다.
+- sentrix-model-server에 FastAPI 서버와 실제 RF/LightGBM 로딩·SHA256·특징 순서·버전 검사, health/schema/score/analyses 구현. Python3.11 분리환경, sklearn1.5.2/LightGBM4.5.0. Mac libomp 설치.
+- 실제 모델이 사용하는 특징은 ranking18/detection58이다. 캠페인 YAML과 같은 이름으로 추정해 입력하지 않는다. 모델의 장애 유형 분류는 미지원이며 Edge 규칙 구현은 후속이다.
+- metadata 분석 요청은 실제 Python 서버가 ABSTAIN/FEATURE_INPUT_UNAVAILABLE로 응답한다. 준비된 특징 파일을 지정하면 실제 점수를 계산하나 정상 기준95백분위/연속2개 판정 구현 전에는 ABSTAIN을 유지한다. 임의0.5 임계값·장애·원인 후보를 만들지 않는다.
+- monitoring은 연결 설정 시 CONFIGURED, 자동분석 요청이 켜져 있어도 BLOCKED_AUTOMATIC_ANALYSIS_UNAVAILABLE. CONFIGURED는 health검사가 아니다. 프론트 검증기·설명·판정보류 문구를 실제 상태에 맞췄다.
+- 검증: Python7개(실제 아티팩트 추론값 대조, 해시/입력/구간/버전/준비파일/보류), Java73개 전체·빌드, 프론트24개·빌드 통과. 합성 특징은 추론 계산 검증용이며 정확도 평가가 아니다. 이번 변경에는 DB migration이 없고 기존 MySQL에 실제 요청·결과 저장으로 연동 확인했다.
+- 실제 실행: Python8000 health READY, Java8080 → Python8000 → MySQL 결과 저장 SUCCEEDED/ABSTAIN 확인. 대시보드5176에서 완료 작업 선택, 보류 사유·모델/특징 버전 표시 확인. '[기능 검증] 실제 Python 모델 서버 연결' 기록1건을 수동 종료 상태로 보존했다. 실제 관측 데이터를 사용한 RCA는 수행하지 않았다.
+- 발견 사항: frozen manifest의 numpy2.5.4는 현재 Python3.11 설치 조합과 재현되지 않았다. numpy1.26.4에서 실제 estimator 대조 테스트로 로딩·계산을 검증했으며 완전한 학습환경 재현으로 주장하지 않는다. Python TestClient 종료의 ResourceWarning이 있었으나7개 테스트는 통과했다.
+- 현재 프로세스는 모델 연결 환경변수로 실행 중이며 기본 설정파일은 여전히 enabled=false다. 재시작 시 README 연결 환경변수 설정이 필요하다. 인증/운영배포·실시간feature 생성기·정상 기준값·연속 감지·전체 장애→RCA 시연은 미완료다.
+- 변경 저장소: core 모니터링상태·문서, dashboard 상태검증·설명, model-server 신규서빙. 각 저장소에서 의미별 커밋한 뒤 한 번씩 푸시한다. PR 없음.
+- 다음: sentrix-ml/features/compute.py와 동일한 온라인 전용 원본조회/기준선 입력을 구현하고 실제 구간에서 feature 동등성 확인. 그 다음 정상 점수 기준값·연속2구간 탐지·Edge 규칙·자동 분석 연결.
