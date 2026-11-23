@@ -156,6 +156,7 @@ class AnalysisExecutionTests {
         db.update("INSERT INTO monitoring_settings(environment_id,enabled,interval_seconds,updated_at,next_run_at) VALUES(?,true,60,?,?)",
                 environmentId, Timestamp.from(first), Timestamp.from(first));
         String record = null;
+        String latestAnomalyJob = null;
         for (var decision : java.util.List.of("ANOMALY", "ANOMALY", "ABSTAIN", "NORMAL")) {
             jobs.enqueueDue(first);
             var req = read(db.queryForObject("SELECT request_json FROM analysis_jobs WHERE automatic_environment_id=? AND status='QUEUED'",
@@ -181,6 +182,10 @@ class AnalysisExecutionTests {
             assertThat(item.path("id").asText()).isEqualTo(record);
             assertThat(item.path("source").asText()).isEqualTo("AUTOMATIC");
             assertThat(item.path("status").asText()).isEqualTo(decision.equals("NORMAL") ? "RESOLVED" : "OPEN");
+            if (decision.equals("ANOMALY")) latestAnomalyJob = req.path("jobId").asText();
+            mvc.perform(get(base + "/" + record + "/rca")).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.result.jobId").value(latestAnomalyJob))
+                    .andExpect(jsonPath("$.result.candidates[0].kind").value("EDGE"));
             if (!decision.equals("ABSTAIN")) {
                 String jobId = req.path("jobId").asText();
                 mvc.perform(get(path(record)+"/"+jobId+"/result")).andExpect(status().isOk())

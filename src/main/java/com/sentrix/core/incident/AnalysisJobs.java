@@ -158,6 +158,30 @@ public class AnalysisJobs {
         return mapper.readValue(json,AnalysisProtocol.Response.class);
     }
 
+    public record IncidentRca(long environmentId, UUID incidentId, AnalysisProtocol.Response result) {}
+
+    @Transactional(readOnly = true)
+    public IncidentRca latestAnomaly(long environmentId, UUID incidentId) {
+        incident(environmentId, incidentId, false);
+        // Read bounded pages so older results remain accessible after a recovery or abstention.
+        final int size = 16;
+        for (long offset = 0; ; offset += size) {
+            var rows = db.queryForList("""
+                    SELECT result_json FROM analysis_jobs
+                    WHERE (incident_id=? OR detected_incident_id=?)
+                      AND status='SUCCEEDED' AND result_json IS NOT NULL
+                    ORDER BY window_end DESC,created_at DESC,id DESC LIMIT ? OFFSET ?
+                    """, String.class, incidentId.toString(), incidentId.toString(), size, offset);
+            for (String row : rows) {
+                var result = mapper.readValue(row, AnalysisProtocol.Response.class);
+                if (result.decision() == AnalysisProtocol.Decision.ANOMALY) {
+                    return new IncidentRca(environmentId, incidentId, result);
+                }
+            }
+            if (rows.size() < size) return new IncidentRca(environmentId, incidentId, null);
+        }
+    }
+
     @Transactional
     public Claim claimNext() {
         var now = Timestamp.from(Instant.now());
