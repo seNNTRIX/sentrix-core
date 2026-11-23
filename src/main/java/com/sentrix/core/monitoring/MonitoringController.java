@@ -95,15 +95,17 @@ class MonitoringController {
             String reason=result!=null && result.abstainReason()!=null?result.abstainReason():r.getString("reason");
             return new Window(r.getString("id"),instant(r.getTimestamp("window_start")),instant(r.getTimestamp("window_end")),
                     r.getString("status"),reason,result==null?null:result.score(),result==null?null:result.decision(),
-                    r.getString("model_version"),created,started,finished,elapsed(created,started),elapsed(started,finished),r.getString("detected_incident_id"));
+                    r.getString("model_version"),created,started,finished,elapsed(created,started),elapsed(started,finished),r.getString("detected_incident_id"),
+                    result == null || result.candidates() == null ? List.of() : result.candidates().stream()
+                            .limit(3).map(c -> new Location(c.rank(), c.kind(), c.service(), c.source(), c.target())).toList());
         },environmentId,limit);
     }
 
     @Operation(summary="환경 장애와 최근 자동 분석 요약",description="환경 전체의 열린 장애 수와 최신 자동 분석 12개를 관측 종료 시각 내림차순으로 조회합니다. 서비스별 RED 지표는 metrics API에서 선택한 기간으로 조회합니다.")
     @GetMapping("/overview")
     @Transactional(readOnly=true)
-    Overview overview(@PathVariable Long environmentId) {
-        var recent = windows(environmentId, 12);
+    Overview overview(@PathVariable Long environmentId, @RequestParam(defaultValue="12") @Min(1) @Max(100) int limit) {
+        var recent = windows(environmentId, limit);
         long open = db.queryForObject("SELECT COUNT(*) FROM incidents WHERE environment_id=? AND status='OPEN'",
                 Long.class, environmentId);
         return new Overview(environmentId, Instant.now(), open, recent);
@@ -118,5 +120,6 @@ class MonitoringController {
     record Settings(@NotNull Boolean enabled,@NotNull @Min(30) @Max(3600) Integer intervalSeconds){}
     record State(Long environmentId,boolean enabled,int intervalSeconds,String executionStatus,String modelStatus,Instant lastSuccessfulAt,Instant updatedAt,Instant nextRunAt){}
     record Window(String jobId,Instant windowStart,Instant windowEnd,String status,String reason,Double score,AnalysisProtocol.Decision decision,
-                  String modelVersion,Instant createdAt,Instant startedAt,Instant finishedAt,Long queueWaitMs,Long executionMs,String incidentId){}
+                  String modelVersion,Instant createdAt,Instant startedAt,Instant finishedAt,Long queueWaitMs,Long executionMs,String incidentId,List<Location> locations){}
+    record Location(int rank,AnalysisProtocol.CandidateKind kind,String service,String source,String target){}
 }

@@ -185,6 +185,11 @@ class AnalysisExecutionTests {
             mvc.perform(get("/api/v1/environments/"+environmentId+"/overview")).andExpect(status().isOk())
                     .andExpect(jsonPath("$.openIncidents").value(decision.equals("NORMAL") ? 0 : 1))
                     .andExpect(jsonPath("$.recentWindows[0].decision").value(decision));
+            if (decision.equals("ANOMALY")) {
+                mvc.perform(get("/api/v1/environments/"+environmentId+"/overview?limit=1"))
+                        .andExpect(jsonPath("$.recentWindows.length()").value(1))
+                        .andExpect(jsonPath("$.recentWindows[0].locations[0].rank").value(1));
+            }
             mvc.perform(get("/api/v1/environments/"+otherId+"/overview")).andExpect(status().isOk())
                     .andExpect(jsonPath("$.openIncidents").value(0)).andExpect(jsonPath("$.recentWindows").isEmpty());
             if (decision.equals("ANOMALY")) latestAnomalyJob = req.path("jobId").asText();
