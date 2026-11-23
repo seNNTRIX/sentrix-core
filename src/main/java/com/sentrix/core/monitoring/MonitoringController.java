@@ -99,6 +99,18 @@ class MonitoringController {
         },environmentId,limit);
     }
 
+    @Operation(summary="환경 장애와 최근 자동 분석 요약",description="환경 전체의 열린 장애 수와 최신 자동 분석 12개를 관측 종료 시각 내림차순으로 조회합니다. 서비스별 RED 지표는 metrics API에서 선택한 기간으로 조회합니다.")
+    @GetMapping("/overview")
+    @Transactional(readOnly=true)
+    Overview overview(@PathVariable Long environmentId) {
+        var recent = windows(environmentId, 12);
+        long open = db.queryForObject("SELECT COUNT(*) FROM incidents WHERE environment_id=? AND status='OPEN'",
+                Long.class, environmentId);
+        return new Overview(environmentId, Instant.now(), open, recent);
+    }
+
+    record Overview(Long environmentId, Instant queriedAt, long openIncidents, List<Window> recentWindows) {}
+
     private void check(Long id){if(!environments.existsById(id))throw PrometheusClient.error(HttpStatus.NOT_FOUND,"ENVIRONMENT_NOT_FOUND","Environment not found");}
     private static Instant instant(Timestamp value){return value==null?null:value.toInstant();}
     private static Long elapsed(Instant start,Instant end){return start==null||end==null?null:Duration.between(start,end).toMillis();}

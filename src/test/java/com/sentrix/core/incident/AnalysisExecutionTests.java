@@ -182,6 +182,11 @@ class AnalysisExecutionTests {
             assertThat(item.path("id").asText()).isEqualTo(record);
             assertThat(item.path("source").asText()).isEqualTo("AUTOMATIC");
             assertThat(item.path("status").asText()).isEqualTo(decision.equals("NORMAL") ? "RESOLVED" : "OPEN");
+            mvc.perform(get("/api/v1/environments/"+environmentId+"/overview")).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.openIncidents").value(decision.equals("NORMAL") ? 0 : 1))
+                    .andExpect(jsonPath("$.recentWindows[0].decision").value(decision));
+            mvc.perform(get("/api/v1/environments/"+otherId+"/overview")).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.openIncidents").value(0)).andExpect(jsonPath("$.recentWindows").isEmpty());
             if (decision.equals("ANOMALY")) latestAnomalyJob = req.path("jobId").asText();
             mvc.perform(get(base + "/" + record + "/rca")).andExpect(status().isOk())
                     .andExpect(jsonPath("$.result.jobId").value(latestAnomalyJob))

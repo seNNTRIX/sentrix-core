@@ -542,6 +542,8 @@ python3 dev/replay/rehearse.py
 
 ### 자동 장애 생성·종료 시연 (저장된 실험 전체 재생)
 
-JDK 21의 JAVA_HOME을 설정하고 위 재생 모델(8001)을 켠 후 `dev/replay/start-automatic.sh`를 실행한다. 입력 파일이 없는 구간도 포함해 리눅스 호출 지연 실험을 30초 경계마다 순서대로 처리한다. 당시의 시각을 Java 예약기에 전달하고 동일한 분석 작업 실행기·Python 모델·DB 트랜잭션으로 실행한다. 실제 PC 시각은 변경하지 않는다. 대시보드 5178, Java 8082, 전용 MySQL 데이터베이스 sentrixautodemo를 사용한다. 장애 목록에서 ‘자동 감지’ 기록을 열어 이상 판정의 근거와 종료 시각을 확인한다. 같은 DB로 다시 시작하면 기존 구간·기록을 재사용한다. 이 화면에는 현재 맥북 쇼핑몰의 관측 자료가 들어오지 않는다.
+JDK 21의 JAVA_HOME을 설정하고 로컬 MySQL·빌드된 대시보드·모델 설치본을 준비한 후 `dev/replay/start-automatic.sh`를 실행한다. 전용 재생 모델(8001)이 실행 중이면 재사용하고 꺼져 있으면 함께 시작한다. 입력 파일이 없는 구간도 포함해 리눅스 호출 지연 실험을 30초 경계마다 순서대로 처리한다. 당시의 시각을 Java 예약기에 전달하고 동일한 분석 작업 실행기·Python 모델·DB 트랜잭션으로 실행한다. 실제 PC 시각은 변경하지 않는다. 대시보드 5178, Java 8082, 전용 MySQL 데이터베이스 sentrixautodemo를 사용한다. 장애 목록에서 ‘자동 감지’ 기록을 열어 이상 판정의 근거와 종료 시각을 확인한다. 같은 DB로 다시 시작하면 기존 구간·기록을 재사용한다. 이 화면에는 현재 맥북 쇼핑몰의 관측 자료가 들어오지 않는다.
 
 `GET /api/v1/environments/{environmentId}/incidents/{incidentId}/rca`는 저장된 이상 판정 중 관측 종료 시각이 가장 최근인 결과를 반환한다. result에는 jobId와 모델 버전·점수·후보·근거가 포함된다. 이상 판정이 없으면 result는 null이고, 잘못된 환경 또는 기록은 404다. 복구 시점의 정상 판정은 해당 작업 결과 API에서 따로 조회한다.
+
+`GET /api/v1/environments/{environmentId}/overview`는 환경 전체의 열린 장애 수(openIncidents), 조회 시각(queriedAt), 최근 자동 분석 구간 최대 12개(recentWindows)를 반환한다. 수동·자동 열린 기록을 모두 센다. 관측 날짜가 지난 구간도 종료 시각을 그대로 표시한다. 서비스별 요청량·오류율·지연과 수집 신호 최신성은 각각 metrics와 collection-status API를 사용한다.

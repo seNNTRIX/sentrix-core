@@ -31,7 +31,7 @@ class OpenApiTests {
                 count++;
             }
         }
-        assertThat(count).isEqualTo(31);
+        assertThat(count).isEqualTo(32);
         assertThat(paths.has("/api/v1/environments/{environmentId}/incidents/{incidentId}/rca")).isTrue();
         assertThat(paths.has("/api/v1/environments/{environmentId}/anomaly-scores")).isTrue();
         assertThat(paths.path("/api/v1/environments/{environmentId}/incidents/{incidentId}/rca-jobs/{jobId}/result").path("get").path("responses").has("409")).isTrue();
