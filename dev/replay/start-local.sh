@@ -19,13 +19,17 @@ docker exec -i "$mysql" sh -c 'test "$MYSQL_USER" = sentrix && MYSQL_PWD="$MYSQL
 CREATE DATABASE IF NOT EXISTS sentrixreplayfold2;
 GRANT ALL PRIVILEGES ON `sentrixreplayfold2`.* TO 'sentrix'@'%';
 SQL
+work=$(mktemp -d)
 children=()
 cleanup() {
   for pid in "${children[@]}"; do kill "$pid" 2>/dev/null || true; done
   wait || true
+  rm -rf -- "$work"
 }
 trap cleanup EXIT
 trap 'exit 0' INT TERM
+# Keep lazy class loading independent of later Maven builds in target/.
+cp "$jar" "$work/replay.jar"
 (
   cd "$model"
   unset SENTRIX_TELEMETRY_CONFIG
@@ -43,7 +47,7 @@ children+=($!)
   export SENTRIX_ANALYSIS_ENABLED=true SENTRIX_ANALYSIS_BASE_URL=http://127.0.0.1:8001
   export SENTRIX_ANALYSIS_MODEL_VERSION=linuxv1-b-fold2 SENTRIX_ANALYSIS_FEATURE_SCHEMA_VERSION=re2ob-v0-rel18-all58
   export SENTRIX_ANALYSIS_TIMEOUT_SECONDS=40
-  exec "$java" -Xmx160m -XX:ActiveProcessorCount=2 -jar "$jar"
+  exec "$java" -Xmx160m -XX:ActiveProcessorCount=2 -jar "$work/replay.jar"
 ) &
 children+=($!)
 (
