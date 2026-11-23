@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Requires the local MySQL container, the built dashboard/JAR and the Linux replay model on port 8001.
+# Uses the local MySQL container, built dashboard/JAR and the Linux replay model.
 set -euo pipefail
 core=$(cd "$(dirname "$0")/../.." && pwd)
 dashboard="$core/../sentrix-dashboard"
@@ -9,7 +9,6 @@ jdk=${JAVA_HOME:?Set JAVA_HOME to JDK 21}
 for port in 8082 5178; do
   if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null; then echo "Port $port is in use" >&2; exit 1; fi
 done
-curl -fsS --max-time 5 http://127.0.0.1:8001/health | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["modelVersion"]=="linuxv1-b-fold2" and d["onlineFeatureStatus"]=="FILE_INPUT_ONLY"'
 bounds=$(python3 - "$manifest" <<'PY'
 import json,sys
 from datetime import datetime,timezone
@@ -28,6 +27,24 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 0' INT TERM
+# Reuse the dedicated replay model if running, otherwise own its lifecycle.
+if ! lsof -nP -iTCP:8001 -sTCP:LISTEN >/dev/null; then
+  (
+    cd "$core/../sentrix-model-server"
+    unset SENTRIX_TELEMETRY_CONFIG
+    export SENTRIX_FEATURE_DIR="$PWD/demo/replay" SENTRIX_MODEL_DIR="$PWD/demo/model-b-fold2"
+    export SENTRIX_CALIBRATION_FILE="$SENTRIX_MODEL_DIR/calibration.json"
+    exec .venv/bin/uvicorn app:app --host 127.0.0.1 --port 8001
+  ) &
+  model_pid=$!
+  children+=("$model_pid")
+  for ((attempt=0; attempt<60; attempt++)); do
+    kill -0 "$model_pid" 2>/dev/null || exit 1
+    if curl -fsS --max-time 2 http://127.0.0.1:8001/health >/dev/null 2>&1; then break; fi
+    sleep 1
+  done
+fi
+curl -fsS --max-time 5 http://127.0.0.1:8001/health | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["modelVersion"]=="linuxv1-b-fold2" and d["onlineFeatureStatus"]=="FILE_INPUT_ONLY"'
 unzip -q "${artifacts[0]}" 'BOOT-INF/classes/*' 'BOOT-INF/lib/*' -d "$work"
 classpath="$work/BOOT-INF/classes:$work/BOOT-INF/lib/*"
 "$jdk/bin/javac" -cp "$classpath" -d "$work" "$core/dev/replay/AutomaticReplay.java"
