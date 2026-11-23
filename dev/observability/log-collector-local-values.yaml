@@ -14,3 +14,17 @@ config:
     pipelines:
       logs:
         exporters: [otlphttp/loki]
+# Allow collector initialization on the single-node Mac before liveness can restart it.
+startupProbe:
+  httpGet: {path: /, port: 13133}
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 24
+livenessProbe:
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 4
+readinessProbe:
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
