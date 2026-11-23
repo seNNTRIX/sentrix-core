@@ -156,8 +156,13 @@ class AnalysisExecutionTests {
         db.update("INSERT INTO monitoring_settings(environment_id,enabled,interval_seconds,updated_at,next_run_at) VALUES(?,true,60,?,?)",
                 environmentId, Timestamp.from(first), Timestamp.from(first));
         String record = null;
+        String firstAnomalyJob = null;
         String latestAnomalyJob = null;
-        for (var decision : java.util.List.of("ANOMALY", "ANOMALY", "ABSTAIN", "NORMAL")) {
+        var decisions = java.util.List.of("ANOMALY", "NORMAL", "ANOMALY", "NORMAL", "ABSTAIN", "NORMAL", "NORMAL", "NORMAL");
+        for (int index = 0; index < decisions.size(); index++) {
+            if (index == 6) first = first.plusSeconds(60); // One scheduled observation was missed.
+            String decision = decisions.get(index);
+            boolean resolved = index == decisions.size()-1;
             jobs.enqueueDue(first);
             var req = read(db.queryForObject("SELECT request_json FROM analysis_jobs WHERE automatic_environment_id=? AND status='QUEUED'",
                     String.class, environmentId));
@@ -165,9 +170,18 @@ class AnalysisExecutionTests {
             var response = (tools.jackson.databind.node.ObjectNode) body;
             response.put("decision", decision);
             if (decision.equals("ANOMALY")) {
-                response.putArray("candidates").addObject().put("rank",1).put("kind","EDGE").putNull("service")
-                        .put("source","frontend").put("target","productcatalogservice").put("faultType","호출 경로")
-                        .put("score",0.8).putArray("evidence").add("호출 지연 증가");
+                var candidates = response.putArray("candidates");
+                for (var service : java.util.List.of("checkoutservice","frontend","cartservice")) {
+                    int rank = candidates.size() + 1;
+                    candidates.addObject().put("rank",rank).put("kind","NODE").put("service",service).putNull("source").putNull("target")
+                            .put("faultType","서비스 내부").put("score",0.6).putArray("evidence").add("가용성 저하");
+                }
+                for (var service : java.util.List.of("productcatalogservice","currencyservice")) {
+                    int rank = candidates.size() + 1;
+                    candidates.addObject().put("rank",rank).put("kind","EDGE").putNull("service")
+                            .put("source","frontend").put("target",service).put("faultType","호출 경로")
+                            .put("score",0.8).putArray("evidence").add("호출 지연 증가");
+                }
             } else if (decision.equals("ABSTAIN")) {
                 response.put("abstainReason","INSUFFICIENT_METRIC_SAMPLES");
                 response.putNull("score");
@@ -181,21 +195,29 @@ class AnalysisExecutionTests {
             if (record == null) record = item.path("id").asText();
             assertThat(item.path("id").asText()).isEqualTo(record);
             assertThat(item.path("source").asText()).isEqualTo("AUTOMATIC");
-            assertThat(item.path("status").asText()).isEqualTo(decision.equals("NORMAL") ? "RESOLVED" : "OPEN");
+            assertThat(item.path("status").asText()).isEqualTo(resolved ? "RESOLVED" : "OPEN");
             mvc.perform(get("/api/v1/environments/"+environmentId+"/overview")).andExpect(status().isOk())
-                    .andExpect(jsonPath("$.openIncidents").value(decision.equals("NORMAL") ? 0 : 1))
+                    .andExpect(jsonPath("$.openIncidents").value(resolved ? 0 : 1))
                     .andExpect(jsonPath("$.recentWindows[0].decision").value(decision));
             if (decision.equals("ANOMALY")) {
                 mvc.perform(get("/api/v1/environments/"+environmentId+"/overview?limit=1"))
                         .andExpect(jsonPath("$.recentWindows.length()").value(1))
-                        .andExpect(jsonPath("$.recentWindows[0].locations[0].rank").value(1));
+                        .andExpect(jsonPath("$.recentWindows[0].locations.length()").value(5))
+                        .andExpect(jsonPath("$.recentWindows[0].locations[0].service").value("checkoutservice"))
+                        .andExpect(jsonPath("$.recentWindows[0].locations[3].kind").value("EDGE"))
+                        .andExpect(jsonPath("$.recentWindows[0].locations[4].target").value("currencyservice"));
             }
             mvc.perform(get("/api/v1/environments/"+otherId+"/overview")).andExpect(status().isOk())
                     .andExpect(jsonPath("$.openIncidents").value(0)).andExpect(jsonPath("$.recentWindows").isEmpty());
-            if (decision.equals("ANOMALY")) latestAnomalyJob = req.path("jobId").asText();
+            if (decision.equals("ANOMALY")) {
+                latestAnomalyJob = req.path("jobId").asText();
+                if (firstAnomalyJob == null) firstAnomalyJob = latestAnomalyJob;
+            }
             mvc.perform(get(base + "/" + record + "/rca")).andExpect(status().isOk())
                     .andExpect(jsonPath("$.result.jobId").value(latestAnomalyJob))
-                    .andExpect(jsonPath("$.result.candidates[0].kind").value("EDGE"));
+                    .andExpect(jsonPath("$.result.candidates[0].kind").value("NODE"));
+            mvc.perform(get(base + "/" + record + "/rca").param("at", "first")).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.result.jobId").value(firstAnomalyJob));
             if (!decision.equals("ABSTAIN")) {
                 String jobId = req.path("jobId").asText();
                 mvc.perform(get(path(record)+"/"+jobId+"/result")).andExpect(status().isOk())
@@ -206,13 +228,47 @@ class AnalysisExecutionTests {
         String overview = "/api/v1/environments/" + environmentId + "/overview";
         mvc.perform(get(overview).param("from","2026-01-01T00:00:00Z")
                         .param("to","2026-01-01T01:00:00Z").param("limit","1"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.recentWindows.length()").value(4));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.recentWindows.length()").value(decisions.size()));
         mvc.perform(get(overview).param("from","2026-01-01T00:00:00Z"))
                 .andExpect(status().isBadRequest());
-        mvc.perform(get(path(record))).andExpect(jsonPath("$.totalElements").value(3));
+        mvc.perform(get(path(record))).andExpect(jsonPath("$.totalElements").value(decisions.size()-1));
         mvc.perform(patch(base+"/"+record).contentType("application/json").content("{\"status\":\"OPEN\"}"))
                 .andExpect(status().isConflict());
         mvc.perform(get("/api/v1/environments/"+otherId+"/incidents/"+record)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/environments/"+otherId+"/incidents/"+record+"/rca").param("at","first"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void manualRcaResolvesTiedWindowsAndRejectsUnknownSelectors() throws Exception {
+        String incident = incident();
+        String rca = base + "/" + incident + "/rca";
+        String normal = job(incident, UUID.randomUUID().toString(), WINDOW_END);
+        runner.runNext();
+        assertThat(state(normal)).isEqualTo("SUCCEEDED");
+        mvc.perform(get(rca).param("at", "first")).andExpect(status().isOk()).andExpect(jsonPath("$.result").isEmpty());
+        mvc.perform(get(rca).param("at", "unknown")).andExpect(status().isBadRequest());
+
+        var anomalies = new java.util.ArrayList<String>();
+        for (int i = 0; i < 2; i++) {
+            String id = job(incident, UUID.randomUUID().toString(), WINDOW_END);
+            var request = read(db.queryForObject("SELECT request_json FROM analysis_jobs WHERE id=?", String.class, id));
+            var response = (tools.jackson.databind.node.ObjectNode) read(successfulResponse(request));
+            response.put("decision","ANOMALY");
+            response.putArray("candidates").addObject().put("rank",1).put("kind","NODE").put("service","checkoutservice").putNull("source").putNull("target")
+                    .put("faultType","서비스 내부").put("score",0.7).putArray("evidence").add("Pod 가용성 저하");
+            responseOverride.set(response.toString());
+            runner.runNext();
+            assertThat(state(id)).isEqualTo("SUCCEEDED");
+            anomalies.add(id);
+        }
+        mvc.perform(get(rca).param("at","first")).andExpect(jsonPath("$.result.jobId").value(anomalies.getFirst()));
+        mvc.perform(get(rca).param("at","latest")).andExpect(jsonPath("$.result.jobId").value(anomalies.getLast()));
+
+        db.update("UPDATE analysis_jobs SET created_at=? WHERE incident_id=?", Timestamp.from(Instant.parse(WINDOW_END)), incident);
+        anomalies.sort(String::compareTo);
+        mvc.perform(get(rca).param("at","first")).andExpect(jsonPath("$.result.jobId").value(anomalies.getFirst()));
+        mvc.perform(get(rca)).andExpect(jsonPath("$.result.jobId").value(anomalies.getLast()));
     }
 
     @Test

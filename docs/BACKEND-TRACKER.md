@@ -1,6 +1,6 @@
 # SentriX 백엔드 개발 현황 및 문제 해결 기록
 
-최종 갱신: 2026-11-23 · 기준 저장소: `seNNTRIX/sentrix-core`
+최종 갱신: 2026-11-24 · 기준 저장소: `seNNTRIX/sentrix-core`
 
 이 문서는 **앞으로 할 일, 완료한 일, 개발 중 발견한 문제와 해결 근거**를 관리하는 기준 문서다. 기존 상세 개발 이력은 [DEVELOPMENT.md](DEVELOPMENT.md), 실행 방법과 현재 API 계약은 [README](../README.md)에 보존한다.
 
@@ -71,7 +71,7 @@
 | API-24 | [x] 자동·수동 기록 | `GET /api/v1/environments/{id}/incidents` | 기간·서비스·상태별 장애 목록 페이지 조회 | BE-13 |
 | API-25 | [x] 자동·수동 기록 | `GET /api/v1/environments/{id}/incidents/{incidentId}` | 장애 시각·영향 서비스·분석 진행 상태 조회 | BE-13 |
 | API-26 | [ ] 대기 | `POST /api/v1/environments/{id}/incidents/{incidentId}/acknowledgements` | 사용자 확인 기록 저장; 자동 회복 판정과 구분 | BE-13, 사용자 식별 방식 |
-| API-27 | [x] 완료 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca` | 원인 서비스·연결 순위, 근거, 중간·최종 결과 반환 | BE-11~13, 모델 연동 |
+| API-27 | [x] 완료 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca` | 첫 이상 판정(first) 또는 최근 이상 판정(latest, 기본)의 원인 후보와 근거 | BE-11~13, 모델 연동 |
 | API-28 | [x] 수동 실행 범위 | `POST /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs` | 분석 구간 고정·작업 접수·중복 방지·기본 미연결; 설정된 서버로 수동 작업 실행 | BE-08, BE-11, BE-13 |
 | API-29 | [x] 수동 작업 범위 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs/{jobId}` | 대기·실행·완료·실패·취소와 고정 구간·버전 조회 | BE-13 |
 | API-30 | [ ] 대기 | `GET /api/v1/environments/{id}/events/stream` | 장애·점수·RCA 결과 갱신을 SSE로 전달 | BE-15; 초기에는 주기 조회로 대체 가능 |
@@ -159,7 +159,8 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 | ISS-15 | 해결 | BE-13 | V5 migration이 H2 MySQL 모드에서 실패 | 여러 ADD COLUMN을 쉼표로 묶은 ALTER 구문 비호환 | 개별 ALTER로 분리; H2 및 MySQL 8.4 migration·전체 테스트 통과 | 없음 |
 | ISS-16 | 해결 | BE-14 | DB 잠금 대기가 길면 작업 실행 기한 판단에 오래된 시각 사용 가능 | 코드 검토에서 선점·완료 시각이 잠금 획득 전 계산됨을 확인 | 잠금 획득 후 시각 계산, 완료 시 작업 행 잠금; 만료·취소 후 결과 차단 테스트 통과 | 장시간 운영 부하 검증은 별도 |
 | ISS-17 | 관찰 중 | BE-18/20 | Docker 엔진 중단으로 MySQL 접근 실패 | Docker 로그의 no space left on device 확인, host 남은 공간 약 3.7GiB | 파일/볼륨 삭제 없이 Docker 재시작·기존 MySQL --no-recreate 기동; health 및 MySQL 테스트 통과 | 저장 공간 부족 재발 가능, 사용자 파일 정리는 수행하지 않음 |
-
+| ISS-18 | 로컬 검증 완료 | API-19/27 | checkoutservice Pod 중단 시 첫 경보의 1위와 장애 목록의 1위가 달랐다. 홈에서 호출 경로 후보도 누락됐다. | 목록이 복구 직전의 최근 이상 판정을 조회했고, 개요 API는 서비스·경로 통합 후보를 상위 3개에서 잘랐다. | 첫 이상 판정 조회와 전체 후보 위치 투영을 추가했다. Java 80건과 OpenAPI 계약 검증 통과. | 전시 환경 배포 및 두 화면 대조 |
+| ISS-19 | 로컬 검증 완료 | BE-13/API-24 | 07:50:09~07:53:09 KST 추천→상품목록 패킷 손실 주입 한 번에 장애 기록 두 건이 생성됐다. | 첫 이상 뒤 07:51:30 분석 구간 하나가 정상으로 나와 기존 기록이 닫혔고, 07:52:00에 이상을 다시 감지했다. | 같은 장애가 연속 두 번 정상일 때 종료한다. 정상 사이에 이상·보류·분석 누락이 있는 회귀 시나리오와 전체 Java 테스트 80건을 통과했다. | 전시 서버에 반영한 뒤 같은 경로에서 재검증 |
 
 새 문제의 상세 기록 양식:
 

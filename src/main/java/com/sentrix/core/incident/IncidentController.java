@@ -57,10 +57,11 @@ class IncidentController {
  }
  @Operation(summary="장애 기록 상세",description="환경에 속한 기록만 반환합니다. 원인 서비스나 RCA 결과를 생성하지 않습니다.")
  @GetMapping("/{incidentId}") IncidentView detail(@PathVariable Long environmentId,@PathVariable UUID incidentId){return incident(environmentId,incidentId,false);}
- @Operation(summary="장애의 최근 이상 판정과 원인 후보", description="관측 종료 시각 기준 최근 이상 결과입니다. 정상 복구 후에도 당시 후보를 유지하며 이상 결과가 없으면 result는 null입니다.")
+ @Operation(summary="장애의 이상 판정과 원인 후보", description="관측 구간 종료 시각이 가장 이른(first) 또는 가장 최근인(latest, 기본값) 이상 판정을 조회합니다. 이상 판정이 없으면 result는 null입니다.")
  @GetMapping("/{incidentId}/rca")
- AnalysisJobs.IncidentRca rca(@PathVariable Long environmentId, @PathVariable UUID incidentId) {
-  return jobs.latestAnomaly(environmentId, incidentId);
+ AnalysisJobs.IncidentRca rca(@PathVariable Long environmentId, @PathVariable UUID incidentId,
+                              @RequestParam(defaultValue="latest") AnalysisJobs.RcaAt at) {
+  return jobs.incidentAnomaly(environmentId, incidentId, at);
  }
 
  @Operation(summary="장애 기록 수동 종료 또는 재개",description="OPEN/RESOLVED로 변경합니다. 수동 종료는 자동 회복 판정이 아닙니다. 종료 시 대기 분석 작업은 취소됩니다. 재개해도 기존 작업을 실행하지 않습니다.")

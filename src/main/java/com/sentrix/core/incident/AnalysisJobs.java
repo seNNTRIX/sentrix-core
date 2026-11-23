@@ -163,19 +163,22 @@ public class AnalysisJobs {
     }
 
     public record IncidentRca(long environmentId, UUID incidentId, AnalysisProtocol.Response result) {}
+    public enum RcaAt { first, latest }
 
     @Transactional(readOnly = true)
-    public IncidentRca latestAnomaly(long environmentId, UUID incidentId) {
+    public IncidentRca incidentAnomaly(long environmentId, UUID incidentId, RcaAt at) {
         incident(environmentId, incidentId, false);
+        String direction = at == RcaAt.first ? "ASC" : "DESC";
+        String sql = """
+                SELECT result_json FROM analysis_jobs
+                WHERE (incident_id=? OR detected_incident_id=?)
+                  AND status='SUCCEEDED' AND result_json IS NOT NULL
+                ORDER BY window_end %1$s, created_at %1$s, id %1$s LIMIT ? OFFSET ?
+                """.formatted(direction);
         // Read bounded pages so older results remain accessible after a recovery or abstention.
         final int size = 16;
         for (long offset = 0; ; offset += size) {
-            var rows = db.queryForList("""
-                    SELECT result_json FROM analysis_jobs
-                    WHERE (incident_id=? OR detected_incident_id=?)
-                      AND status='SUCCEEDED' AND result_json IS NOT NULL
-                    ORDER BY window_end DESC,created_at DESC,id DESC LIMIT ? OFFSET ?
-                    """, String.class, incidentId.toString(), incidentId.toString(), size, offset);
+            var rows = db.queryForList(sql, String.class, incidentId.toString(), incidentId.toString(), size, offset);
             for (String row : rows) {
                 var result = mapper.readValue(row, AnalysisProtocol.Response.class);
                 if (result.decision() == AnalysisProtocol.Decision.ANOMALY) {
@@ -263,11 +266,29 @@ public class AnalysisJobs {
                     "최초 판정의 원인 후보 1순위 · " + candidate, observedAt, now);
         } else {
             incidentId = open.getFirst();
-            if (result.decision() == AnalysisProtocol.Decision.NORMAL) {
+            if (result.decision() == AnalysisProtocol.Decision.NORMAL
+                    && previousScheduledWindowWasNormal(environment, incidentId, result.windowEnd())) {
                 db.update("UPDATE incidents SET status='RESOLVED',resolved_at=? WHERE id=?", observedAt, incidentId);
                 cancelForIncident(UUID.fromString(incidentId), now.toInstant());
             }
         }
         db.update("UPDATE analysis_jobs SET detected_incident_id=? WHERE id=?", incidentId, result.jobId().toString());
     }
+
+    private boolean previousScheduledWindowWasNormal(long environment, String incidentId, Instant end) {
+        // The scheduler rounds observation times down to a ten-second boundary.
+        var prior = db.query("""
+                SELECT j.detected_incident_id, j.result_json, j.window_end, s.interval_seconds
+                FROM analysis_jobs j JOIN monitoring_settings s ON s.environment_id=j.automatic_environment_id
+                WHERE j.automatic_environment_id=? AND j.window_end<? ORDER BY j.window_end DESC LIMIT 1
+                """, (row, n) -> {
+                    if (!incidentId.equals(row.getString("detected_incident_id"))) return false;
+                    long maxGap = ((row.getInt("interval_seconds") + 9) / 10) * 10L;
+                    if (row.getTimestamp("window_end").toInstant().isBefore(end.minusSeconds(maxGap))) return false;
+                    var json = row.getString("result_json");
+                    return json != null && "NORMAL".equals(mapper.readTree(json).path("decision").asText());
+                }, environment, Timestamp.from(end));
+        return !prior.isEmpty() && prior.getFirst();
+    }
+
 }

@@ -101,11 +101,11 @@ class MonitoringController {
                     r.getString("status"),reason,result==null?null:result.score(),result==null?null:result.decision(),
                     r.getString("model_version"),created,started,finished,elapsed(created,started),elapsed(started,finished),r.getString("detected_incident_id"),
                     result == null || result.candidates() == null ? List.of() : result.candidates().stream()
-                            .limit(3).map(c -> new Location(c.rank(), c.kind(), c.service(), c.source(), c.target())).toList());
+                            .map(c -> new Location(c.rank(), c.kind(), c.service(), c.source(), c.target())).toList());
         },args);
     }
 
-    @Operation(summary="환경 장애와 최근 자동 분석 요약",description="from·to를 함께 지정하면 최대 24시간 동안 겹치는 모든 분석 구간을 반환합니다. 생략하면 최근 구간을 반환합니다. 서비스별 RED 지표는 metrics API에서 선택한 기간으로 조회합니다.")
+    @Operation(summary="환경 장애와 최근 자동 분석 요약",description="from·to를 함께 지정하면 최대 24시간 동안 겹치는 모든 분석 구간을 반환합니다. 생략하면 최근 구간을 반환합니다. locations에는 구간별 모든 원인 후보의 순위와 서비스 또는 호출 양 끝이 들어갑니다.")
     @GetMapping("/overview")
     @Transactional(readOnly=true)
     Overview overview(@PathVariable Long environmentId, @RequestParam(defaultValue="12") @Min(1) @Max(100) int limit,

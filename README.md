@@ -523,7 +523,7 @@ Java에는 `SENTRIX_ANALYSIS_TIMEOUT_SECONDS=60`을 설정한다. 30초 구간·
 
 ### 자동 감지 기록
 
-자동 작업에서 검증된 ANOMALY를 받으면 환경별로 장애 기록을 열고, 이어지는 이상 구간들을 같은 기록에 연결한다. 다음 NORMAL에서 해당 기록을 종료한다. ABSTAIN이나 조회 실패는 상태를 바꾸지 않는다. 발생·종료 시각은 해당 판정 구간의 끝이며 실제 물리적 장애 시각의 추정값이 아니다. 최초 원인 후보가 연결이면 service 필드는 호출한 서비스를 담고, 경로 양쪽은 작업 결과에서 조회한다. 기존 수동 기록은 MANUAL, 자동 기록은 AUTOMATIC이다. 자동 기록의 상태는 모델이 관리한다.
+자동 작업에서 검증된 ANOMALY를 받으면 환경별로 장애 기록을 열고, 이어지는 이상 구간들을 같은 기록에 연결한다. 두 번 연속 NORMAL인 경우 두 번째 구간의 끝에 장애를 종료한다. 전시 환경에서는 30초마다 판정한다. 사이에 이상, 보류, 실패 또는 분석 누락이 있으면 두 번의 정상 판정을 다시 기다린다. 발생·종료 시각은 해당 판정 구간의 끝이며 실제 물리적 장애 시각의 추정값이 아니다. 최초 원인 후보가 연결이면 service 필드는 호출한 서비스를 담고, 경로 양쪽은 작업 결과에서 조회한다. 기존 수동 기록은 MANUAL, 자동 기록은 AUTOMATIC이다. 자동 기록의 상태는 모델이 관리한다.
 
 구간 점수 이력의 incidentId 또는 장애 목록에서 상세로 이동하면 rca-jobs와 기존 결과 API에서 당시 후보와 근거를 조회할 수 있다. 수동 재분석은 자동 기록을 생성하거나 종료하지 않는다.
 
@@ -544,8 +544,8 @@ python3 dev/replay/rehearse.py
 
 JDK 21의 JAVA_HOME을 설정하고 로컬 MySQL·빌드된 대시보드·모델 설치본을 준비한 후 `dev/replay/start-automatic.sh`를 실행한다. 전용 재생 모델(8001)이 실행 중이면 재사용하고 꺼져 있으면 함께 시작한다. 입력 파일이 없는 구간도 포함해 리눅스 호출 지연 실험을 30초 경계마다 순서대로 처리한다. 당시의 시각을 Java 예약기에 전달하고 동일한 분석 작업 실행기·Python 모델·DB 트랜잭션으로 실행한다. 실제 PC 시각은 변경하지 않는다. 대시보드 5178, Java 8082, 전용 MySQL 데이터베이스 sentrixautodemo를 사용한다. 장애 목록에서 ‘자동 감지’ 기록을 열어 이상 판정의 근거와 종료 시각을 확인한다. 같은 DB로 다시 시작하면 기존 구간·기록을 재사용한다. 이 화면에는 현재 맥북 쇼핑몰의 관측 자료가 들어오지 않는다.
 
-`GET /api/v1/environments/{environmentId}/incidents/{incidentId}/rca`는 저장된 이상 판정 중 관측 종료 시각이 가장 최근인 결과를 반환한다. result에는 jobId와 모델 버전·점수·후보·근거가 포함된다. 이상 판정이 없으면 result는 null이고, 잘못된 환경 또는 기록은 404다. 복구 시점의 정상 판정은 해당 작업 결과 API에서 따로 조회한다.
+`GET /api/v1/environments/{environmentId}/incidents/{incidentId}/rca`는 기본적으로 해당 장애의 가장 최근 이상 판정을 반환한다. `?at=first`는 첫 이상 판정, `?at=latest`는 가장 최근 이상 판정을 선택한다. 기준은 관측 구간 종료 시각이며, 같은 시각이면 작업 생성 시각과 작업 ID 순으로 구분한다. 자동·수동 장애 모두 result에 선택한 jobId와 모델 버전·점수·후보·근거를 반환한다. 저장된 이상 판정이 없으면 result는 null이다. 지원하지 않는 at은 400, 다른 환경의 장애나 존재하지 않는 기록은 404다. 복구 시점의 정상 판정은 해당 작업 결과 API에서 조회한다.
 
-`GET /api/v1/environments/{environmentId}/overview`는 환경 전체의 열린 장애 수(openIncidents), 조회 시각(queriedAt), 최근 자동 분석 구간(recentWindows, 기본 12개, 선택적 limit 1~100개)를 반환한다. from과 to를 함께 보내면 해당 시간대와 겹치는 모든 구간을 반환하며 최대 범위는 24시간이다. 기간을 지정하면 limit은 적용하지 않는다. 각 구간의 locations는 해당 시점 상위 세 후보의 순위·서비스 또는 호출 양 끝을 담는다. 수동·자동 열린 기록을 모두 센다. 관측 날짜가 지난 구간도 종료 시각을 그대로 표시한다. 서비스별 요청량·오류율·지연과 수집 신호 최신성은 각각 metrics와 collection-status API를 사용한다.
+`GET /api/v1/environments/{environmentId}/overview`는 환경 전체의 열린 장애 수(openIncidents), 조회 시각(queriedAt), 최근 자동 분석 구간(recentWindows, 기본 12개, 선택적 limit 1~100개)를 반환한다. from과 to를 함께 보내면 해당 시간대와 겹치는 모든 구간을 반환하며 최대 범위는 24시간이다. 기간을 지정하면 limit은 적용하지 않는다. 각 구간의 locations는 모델이 반환한 모든 서비스·호출 경로 후보의 순위와 위치를 담으며 후보가 없으면 빈 배열이다. 수동·자동 열린 기록을 모두 센다. 관측 날짜가 지난 구간도 종료 시각을 그대로 표시한다. 서비스별 요청량·오류율·지연과 수집 신호 최신성은 각각 metrics와 collection-status API를 사용한다.
 
 Explore의 로그 발생량 API는 각 버킷의 전체 count와 함께 Loki의 detected_level 집계인 levels를 반환한다. 미관측 구간은 count=null이고 levels는 빈 객체다. 원문 없이도 레벨별 발생량을 그릴 수 있다. Trace 검색은 namedRoot(루트 이름 수집 여부 제한), minSpanMs(초과, 0~86400000), errorOnly, operation(정확히 일치) 조건을 선택적으로 받는다. 모두 같은 환경·서비스의 span에 적용하며 matchedSpans는 Tempo에서 해당 개수를 제공할 때만 반환한다.

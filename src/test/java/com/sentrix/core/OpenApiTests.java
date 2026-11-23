@@ -32,7 +32,11 @@ class OpenApiTests {
             }
         }
         assertThat(count).isEqualTo(32);
-        assertThat(paths.has("/api/v1/environments/{environmentId}/incidents/{incidentId}/rca")).isTrue();
+        var rcaParameters = paths.path("/api/v1/environments/{environmentId}/incidents/{incidentId}/rca").path("get").path("parameters");
+        var at = rcaParameters.valueStream().filter(p -> p.path("name").asText().equals("at")).findFirst().orElseThrow();
+        assertThat(at.path("schema").path("enum").valueStream().map(n -> n.asText()).toList())
+                .containsExactlyInAnyOrder("first", "latest");
+        assertThat(at.path("schema").path("default").asText()).isEqualTo("latest");
         assertThat(paths.has("/api/v1/environments/{environmentId}/anomaly-scores")).isTrue();
         assertThat(paths.path("/api/v1/environments/{environmentId}/incidents/{incidentId}/rca-jobs/{jobId}/result").path("get").path("responses").has("409")).isTrue();
         var volume = paths.path("/api/v1/environments/{environmentId}/logs/volume").path("get");
