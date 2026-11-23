@@ -113,6 +113,14 @@ class LogApiTests {
         payload.set("{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[]}}");
         mvc.perform(volumeRequest()).andExpect(status().isOk()).andExpect(jsonPath("$.dataStatus").value("NO_DATA"));
     }
+    @Test void logsVolumeCombinesSeveritySeriesWithoutFillingMissingWindows() throws Exception {
+        String info=matrix("[[1700000040,\"4\"]]").replace("\"frontend\"","\"frontend\",\"sx_level\":\"info\"");
+        String extra="{\"metric\":{\"k8s_namespace_name\":\"sentrix\",\"k8s_deployment_name\":\"frontend\",\"sx_level\":\"warn\"},\"values\":[[1700000040,\"2\"]]}";
+        payload.set(info.replace("}]}}","},"+extra+"]}}"));
+        mvc.perform(volumeRequest()).andExpect(status().isOk()).andExpect(jsonPath("$.buckets[0].count").value(6))
+                .andExpect(jsonPath("$.buckets[0].levels.info").value(4)).andExpect(jsonPath("$.buckets[0].levels.warning").value(2))
+                .andExpect(jsonPath("$.buckets[1].count").isEmpty());
+    }
     @Test void volumeRejectsBadBoundsBeforeCallingLoki() throws Exception {
         mvc.perform(volumeRequest().param("bucketSeconds","61")).andExpect(status().isBadRequest());
         mvc.perform(volumeRequest().param("bucketSeconds","0")).andExpect(status().isBadRequest());

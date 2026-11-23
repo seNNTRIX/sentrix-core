@@ -31,8 +31,12 @@ class TraceController {
     @GetMapping
     SearchResult search(@PathVariable Long environmentId, @RequestParam String service,
                         @RequestParam Instant from, @RequestParam Instant to,
-                        @RequestParam(defaultValue="20") int limit) {
-        if (!service.matches("[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?") || limit<1 || limit>100
+                        @RequestParam(defaultValue="20") int limit,
+                        @RequestParam(required=false) Integer minSpanMs,
+                        @RequestParam(defaultValue="false") boolean errorOnly,
+                        @RequestParam(defaultValue="false") boolean namedRoot,
+                        @RequestParam(defaultValue="") String operation) {
+        if ((minSpanMs!=null && (minSpanMs<0 || minSpanMs>86400000)) || operation.length()>200 || operation.chars().anyMatch(Character::isISOControl) || !service.matches("[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?") || limit<1 || limit>100
                 || from.getNano()!=0 || to.getNano()!=0 || from.isBefore(Instant.EPOCH) || !from.isBefore(to)
                 || Duration.between(from,to).compareTo(Duration.ofHours(24))>0) {
             throw error(HttpStatus.BAD_REQUEST,"INVALID_QUERY","Use a service, whole-second times up to 24 hours and limit 1..100");
@@ -40,7 +44,12 @@ class TraceController {
         String namespace=namespace(environmentId);
         var source=source(environmentId);
         String query="{ resource.service.namespace = "+mapper.writeValueAsString(namespace)
-                +" && resource.service.name = "+mapper.writeValueAsString(service)+" }";
+                +" && resource.service.name = "+mapper.writeValueAsString(service);
+        if (namedRoot) query+=" && trace:rootName != \"\"";
+        if (minSpanMs!=null) query+=" && duration > "+minSpanMs+"ms";
+        if (errorOnly) query+=" && status = error";
+        if (!operation.isEmpty()) query+=" && name = "+mapper.writeValueAsString(operation);
+        query+=" }";
         var root=http.read(source.baseUrl,source.timeoutSeconds,"/api/search",Map.of("q",query,
                 "start",Long.toString(from.getEpochSecond()),"end",Long.toString(to.getEpochSecond()),"limit",Integer.toString(limit)),false,"TEMPO");
         var traces=root.path("traces");
@@ -54,7 +63,11 @@ class TraceController {
             long duration=trace.path("durationMs").asLong(0); // protobuf omits a zero duration
             if (duration<0) throw invalid();
             long start=nanos(trace.path("startTimeUnixNano"));
-            items.add(new TraceSummary(id,instant(start),duration,trace.path("rootServiceName").asText(""),trace.path("rootTraceName").asText("")));
+            var spanSet=trace.path("spanSet");
+            if (spanSet.isMissingNode()) spanSet=trace.path("spanSets").path(0);
+            var matched=spanSet.path("matched");
+            Integer matchedSpans=matched.isIntegralNumber() && matched.canConvertToInt() && matched.asInt()>=0 ? matched.asInt() : null;
+            items.add(new TraceSummary(id,instant(start),duration,trace.path("rootServiceName").asText(""),trace.path("rootTraceName").asText(""),matchedSpans));
         }
         items.sort(Comparator.comparing(TraceSummary::startedAt).reversed().thenComparing(TraceSummary::traceId));
         boolean limitReached=items.size()==limit;
@@ -162,7 +175,7 @@ class TraceController {
     private static String kind(String code) {return switch(code){case "1","SPAN_KIND_INTERNAL"->"INTERNAL";case "2","SPAN_KIND_SERVER"->"SERVER";case "3","SPAN_KIND_CLIENT"->"CLIENT";case "4","SPAN_KIND_PRODUCER"->"PRODUCER";case "5","SPAN_KIND_CONSUMER"->"CONSUMER";case "0","SPAN_KIND_UNSPECIFIED"->"UNSPECIFIED";default->throw invalid();};}
     private static ResponseStatusException invalid(){return error(HttpStatus.BAD_GATEWAY,"INVALID_TEMPO_RESPONSE","Unexpected Tempo response");}
     private static ResponseStatusException notFound(){return error(HttpStatus.NOT_FOUND,"TRACE_NOT_FOUND","No trace spans found in this environment");}
-    record TraceSummary(String traceId,Instant startedAt,long durationMs,String rootService,String rootOperation){}
+    record TraceSummary(String traceId,Instant startedAt,long durationMs,String rootService,String rootOperation,Integer matchedSpans){}
     record SearchResult(Long environmentId,String namespace,String service,Instant from,Instant to,Instant queriedAt,int limit,
                         boolean limitReached,String dataStatus,List<String>warnings,List<TraceSummary>items){}
     record Span(String spanId,String parentSpanId,String service,String operation,String kind,String status,

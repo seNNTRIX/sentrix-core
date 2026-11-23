@@ -51,6 +51,13 @@ class TraceApiTests {
     @AfterAll static void stop(){server.stop(0);}
     org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder search(){return get(base).param("service","frontend")
             .param("from","2023-11-14T22:13:20Z").param("to","2023-11-14T22:14:20Z");}
+    @Test void traceQlConditionsAreBoundToTheEnvironmentAndService() throws Exception {
+        mvc.perform(search().param("namedRoot","true").param("minSpanMs","200").param("errorOnly","true").param("operation","GetProduct"))
+                .andExpect(status().isOk());
+        String actual=URLDecoder.decode(query.get(),StandardCharsets.UTF_8);
+        assertTrue(actual.contains("resource.service.namespace = \"sentrix\" && resource.service.name = \"frontend\" && trace:rootName != \"\" && duration > 200ms && status = error && name = \"GetProduct\""));
+        mvc.perform(search().param("minSpanMs","-1")).andExpect(status().isBadRequest());
+    }
     static String span(String id,String parent,long offset) {
         return "{\"traceId\":\""+TRACE+"\",\"spanId\":\""+id+"\",\"parentSpanId\":\""+parent+"\",\"name\":\"GET /cart\",\"kind\":\"SPAN_KIND_SERVER\",\"startTimeUnixNano\":\""+(1700000000000000000L+offset)+"\",\"endTimeUnixNano\":\"1700000000010000000\",\"status\":{\"code\":\"STATUS_CODE_ERROR\"}}";
     }

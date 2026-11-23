@@ -39,23 +39,38 @@ class LogVolumeController {
                 .orElseThrow(()->error(HttpStatus.CONFLICT,"LOKI_NOT_CONFIGURED","Configure Loki first"));
         String selector="{k8s_namespace_name="+mapper.writeValueAsString(env.getNamespace())+",k8s_deployment_name="+mapper.writeValueAsString(service)+"}";
         if(!search.isEmpty()) selector+=" |= "+mapper.writeValueAsString(search);
-        String query="sum by(k8s_namespace_name,k8s_deployment_name)(count_over_time("+selector+"["+bucketSeconds+"s]))";
+        String query="sum by(k8s_namespace_name,k8s_deployment_name,sx_level)(count_over_time("+selector+" | label_format sx_level=\"{{.detected_level}}\" ["+bucketSeconds+"s]))";
         var root=http.read(source.baseUrl,source.timeoutSeconds,"/loki/api/v1/query_range",
                 Map.of("query",query,"start",from.plusSeconds(bucketSeconds).toString(),"end",to.toString(),"step",String.valueOf(bucketSeconds)),false,"LOKI");
         if(!"success".equals(root.path("status").asText())) throw error(HttpStatus.BAD_GATEWAY,"LOKI_QUERY_FAILED","Loki could not execute the query");
         var data=root.path("data");var rows=data.path("result");
-        if(!"matrix".equals(data.path("resultType").asText()) || !rows.isArray() || rows.size()>1) throw invalid();
+        if(!"matrix".equals(data.path("resultType").asText()) || !rows.isArray() || rows.size()>32) throw invalid();
         var values=new HashMap<Instant,Long>();
+        var levels=new HashMap<Instant,Map<String,Long>>();
+        var series=new HashSet<String>();
         for(var row:rows) {
             var labels=row.path("metric");var samples=row.path("values");
             if(!env.getNamespace().equals(labels.path("k8s_namespace_name").asText()) || !service.equals(labels.path("k8s_deployment_name").asText())
                     || !samples.isArray() || samples.size()>count) throw invalid();
+            String reportedLevel=labels.path("sx_level").asText("");
+            if(!series.add(reportedLevel)) throw invalid();
+            String level=switch(reportedLevel) {
+                case "fatal","critical","error" -> "error";
+                case "warn","warning" -> "warning";
+                case "info","debug","trace" -> reportedLevel;
+                default -> "unknown";
+            };
+            var seen=new HashSet<Instant>();
             for(var sample:samples) {
                 if(!sample.isArray() || sample.size()!=2 || !sample.get(0).isNumber() || !sample.get(1).isTextual()) throw invalid();
                 Instant time;long value;
                 try {time=Instant.ofEpochSecond(new BigDecimal(sample.get(0).asText()).longValueExact());value=new BigDecimal(sample.get(1).asText()).longValueExact();}
                 catch(RuntimeException e){throw invalid();}
-                if(!time.isAfter(from)||time.isAfter(to)||(time.getEpochSecond()-from.getEpochSecond())%bucketSeconds!=0||value<0||values.putIfAbsent(time,value)!=null) throw invalid();
+                if(!time.isAfter(from)||time.isAfter(to)||(time.getEpochSecond()-from.getEpochSecond())%bucketSeconds!=0||value<0||!seen.add(time)) throw invalid();
+                try {
+                    values.merge(time,value,Math::addExact);
+                    levels.computeIfAbsent(time,t->new TreeMap<>()).merge(level,value,Math::addExact);
+                } catch(ArithmeticException e) {throw invalid();}
             }
         }
         var warnings=new ArrayList<String>();
@@ -65,13 +80,13 @@ class LogVolumeController {
         var buckets=new ArrayList<Bucket>();
         for(long i=0;i<count;i++) {
             Instant start=from.plusSeconds(i*bucketSeconds),end=start.plusSeconds(bucketSeconds);
-            buckets.add(new Bucket(start,end,values.get(end)));
+            buckets.add(new Bucket(start,end,values.get(end),levels.getOrDefault(end,Map.of())));
         }
         return new LogVolumeResult(environmentId,env.getNamespace(),service,from,to,bucketSeconds,search,"START_EXCLUSIVE_END_INCLUSIVE",status,List.copyOf(warnings),List.copyOf(buckets));
     }
     private static org.springframework.web.server.ResponseStatusException bad(String detail){return error(HttpStatus.BAD_REQUEST,"INVALID_QUERY",detail);}
     private static org.springframework.web.server.ResponseStatusException invalid(){return error(HttpStatus.BAD_GATEWAY,"INVALID_LOKI_RESPONSE","Unexpected Loki volume response");}
-    record Bucket(Instant from,Instant to,Long count){}
+    record Bucket(Instant from,Instant to,Long count,Map<String,Long> levels){}
     record LogVolumeResult(Long environmentId,String namespace,String service,Instant from,Instant to,int bucketSeconds,String search,
                   String intervalBounds,String dataStatus,List<String>warnings,List<Bucket>buckets){}
 }
