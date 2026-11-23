@@ -33,7 +33,12 @@ cp "$jar" "$work/replay.jar"
 (
   cd "$model"
   unset SENTRIX_TELEMETRY_CONFIG
-  export SENTRIX_FEATURE_DIR="$model/demo/replay" SENTRIX_CALIBRATION_FILE="$model/demo/model-b-fold2/calibration.json"
+  # Keep per-visitor observation windows outside the checkout. Environment 1 is the original archive.
+  export SENTRIX_FEATURE_DIR="$(python3 -c 'import tempfile; print(tempfile.gettempdir()+"/sentrix-exhibition-features")')"
+  mkdir -p -m 700 "$SENTRIX_FEATURE_DIR"
+  if [[ ! -e "$SENTRIX_FEATURE_DIR/1" ]]; then ln -s "$model/demo/replay/1" "$SENTRIX_FEATURE_DIR/1"; fi
+  [[ "$SENTRIX_FEATURE_DIR/1" -ef "$model/demo/replay/1" ]]
+  export SENTRIX_CALIBRATION_FILE="$model/demo/model-b-fold2/calibration.json"
   export SENTRIX_MODEL_DIR="$model/demo/model-b-fold2"
   exec .venv/bin/uvicorn app:app --host 127.0.0.1 --port 8001
 ) &

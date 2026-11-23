@@ -231,6 +231,21 @@ class AnalysisExecutionTests {
     }
 
     @Test
+    void latePollKeepsTheOriginalObservationGrid() {
+        var due = Instant.parse("2026-01-01T00:02:00Z");
+        db.update("INSERT INTO monitoring_settings(environment_id,enabled,interval_seconds,updated_at,next_run_at) VALUES(?,true,30,?,?)",
+                environmentId,Timestamp.from(due),Timestamp.from(due));
+        try {
+            jobs.enqueueDue(due.plusSeconds(14));
+            assertThat(db.queryForObject("SELECT window_end FROM analysis_jobs WHERE automatic_environment_id=?",Timestamp.class,environmentId).toInstant()).isEqualTo(due.minusSeconds(30));
+            assertThat(db.queryForObject("SELECT next_run_at FROM monitoring_settings WHERE environment_id=?",Timestamp.class,environmentId).toInstant()).isEqualTo(due.plusSeconds(30));
+        } finally {
+            db.update("DELETE FROM analysis_jobs WHERE automatic_environment_id=?",environmentId);
+            db.update("DELETE FROM monitoring_settings WHERE environment_id=?",environmentId);
+        }
+    }
+
+    @Test
     void automaticWindowsAreIndependentIsolatedAndStopOnDisable() throws Exception {
         String url="/api/v1/environments/"+environmentId;
         try {

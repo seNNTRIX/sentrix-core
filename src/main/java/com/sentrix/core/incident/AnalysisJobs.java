@@ -32,6 +32,7 @@ public class AnalysisJobs {
                       Instant windowEnd, Instant readyAt, String contractVersion, String featureSchemaVersion,
                       String modelVersion, Instant startedAt, Instant finishedAt) {}
     public record JobPage(List<Job> items, int page, int size, long totalElements, long totalPages) {}
+    private record Schedule(int seconds, Instant dueAt) {}
     private record Pending(String id, String incidentId, long environmentId) {}
     public record Claim(String jobId, String token, String requestJson) {}
 
@@ -105,17 +106,20 @@ public class AnalysisJobs {
                 WHERE enabled=true AND next_run_at<=? ORDER BY next_run_at,environment_id LIMIT 16
                 """,Long.class,Timestamp.from(now));
         due.sort(Long::compareTo);
-        Instant end = Instant.ofEpochSecond(Math.floorDiv(now.getEpochSecond()-30,10)*10);
         for (long env : due) {
             // Use the same environment-first lock order as settings updates and recheck eligibility.
             String namespace = db.queryForObject("SELECT namespace FROM environments WHERE id=? FOR UPDATE",String.class,env);
-            var intervals = db.queryForList("""
-                    SELECT interval_seconds FROM monitoring_settings
+            var schedules = db.query("""
+                    SELECT interval_seconds,next_run_at FROM monitoring_settings
                     WHERE environment_id=? AND enabled=true AND next_run_at<=? FOR UPDATE
-                    """,Integer.class,env,Timestamp.from(now));
-            if (intervals.isEmpty()) continue;
+                    """,(row,index)->new Schedule(row.getInt(1), row.getTimestamp(2).toInstant()),env,Timestamp.from(now));
+            if (schedules.isEmpty()) continue;
+            var schedule = schedules.getFirst();
+            long elapsed = java.time.Duration.between(schedule.dueAt(),now).getSeconds();
+            Instant slot = schedule.dueAt().plusSeconds((elapsed/schedule.seconds())*schedule.seconds());
+            Instant end = Instant.ofEpochSecond(Math.floorDiv(slot.getEpochSecond()-30,10)*10);
             db.update("UPDATE monitoring_settings SET next_run_at=? WHERE environment_id=?",
-                    Timestamp.from(now.plusSeconds(intervals.getFirst())),env);
+                    Timestamp.from(slot.plusSeconds(schedule.seconds())),env);
             // After downtime, analyze the newest mature window and leave gaps visible.
             var previous = db.queryForList("""
                     SELECT id FROM analysis_jobs WHERE automatic_environment_id=?
