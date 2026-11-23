@@ -45,6 +45,7 @@ class AnalysisExecutionTests {
     @Autowired EnvironmentRepository environments;
     @Autowired JdbcTemplate db;
     @Autowired AnalysisJobRunner runner;
+    @Autowired AnalysisJobs jobs;
     Long environmentId;
     Long otherId;
     String base;
@@ -171,6 +172,35 @@ class AnalysisExecutionTests {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.modelStatus").value("CONFIGURED"))
                 .andExpect(jsonPath("$.executionStatus").value("BLOCKED_AUTOMATIC_ANALYSIS_UNAVAILABLE"));
         db.update("DELETE FROM monitoring_settings WHERE environment_id=?",environmentId);
+    }
+
+    @Test
+    void automaticWindowsAreIndependentIsolatedAndStopOnDisable() throws Exception {
+        String url="/api/v1/environments/"+environmentId;
+        try {
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(url+"/monitoring")
+                    .contentType("application/json").content("{\"enabled\":true,\"intervalSeconds\":30}"))
+                    .andExpect(status().isOk());
+            var now=Instant.now();
+            jobs.enqueueDue(now);
+            jobs.enqueueDue(now);
+            runner.runNext();
+            mvc.perform(get(url+"/anomaly-scores"))
+                    .andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].score").value(0.1))
+                    .andExpect(jsonPath("$[0].queueWaitMs").isNumber()).andExpect(jsonPath("$[0].executionMs").isNumber());
+            mvc.perform(get("/api/v1/environments/"+otherId+"/anomaly-scores")).andExpect(jsonPath("$.length()").value(0));
+            jobs.enqueueDue(now.plusSeconds(1200));
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(url+"/monitoring")
+                    .contentType("application/json").content("{\"enabled\":false,\"intervalSeconds\":30}"))
+                    .andExpect(jsonPath("$.lastSuccessfulAt").isString());
+            jobs.enqueueDue(now.plusSeconds(1500));
+            mvc.perform(get(url+"/anomaly-scores")).andExpect(jsonPath("$.length()").value(2))
+                    .andExpect(jsonPath("$[0].reason").value("MONITORING_DISABLED"));
+            assertThat(db.queryForObject("SELECT COUNT(*) FROM incidents WHERE environment_id=?",Integer.class,environmentId)).isZero();
+        } finally {
+            db.update("DELETE FROM analysis_jobs WHERE automatic_environment_id=?",environmentId);
+            db.update("DELETE FROM monitoring_settings WHERE environment_id=?",environmentId);
+        }
     }
 
     @Test

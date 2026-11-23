@@ -32,6 +32,7 @@ public class AnalysisJobs {
                       Instant windowEnd, Instant readyAt, String contractVersion, String featureSchemaVersion,
                       String modelVersion, Instant startedAt, Instant finishedAt) {}
     public record JobPage(List<Job> items, int page, int size, long totalElements, long totalPages) {}
+    private record Pending(String id, String incidentId, long environmentId) {}
     public record Claim(String jobId, String token, String requestJson) {}
 
     private static Instant time(ResultSet r, String column) throws SQLException {
@@ -76,15 +77,54 @@ public class AnalysisJobs {
         if (end.isBefore(Instant.parse("1970-01-01T00:00:30Z"))) throw error(HttpStatus.BAD_REQUEST,"INVALID_ANALYSIS_WINDOW");
         Instant start = end.minusSeconds(30), ready = end.plusSeconds(30), now = Instant.now();
         String namespace = db.queryForObject("SELECT namespace FROM environments WHERE id=?",String.class,environmentId);
+        UUID id = insert(environmentId, incidentId, requestKey, namespace, start, end, ready, now);
+        return get(environmentId,incidentId,id);
+    }
+
+    private UUID insert(long environmentId, UUID incidentId, UUID key, String namespace, Instant start,
+                        Instant end, Instant ready, Instant now) {
         UUID id = UUID.randomUUID();
         var request = new AnalysisProtocol.Request(AnalysisProtocol.CONTRACT_VERSION,id,environmentId,namespace,start,end,
                 settings.enabled() ? settings.featureSchemaVersion() : null,settings.enabled() ? settings.modelVersion() : null);
-        String state = settings.enabled() ? "QUEUED" : "BLOCKED_MODEL_UNAVAILABLE";
-        db.update("INSERT INTO analysis_jobs(id,incident_id,request_key,status,reason,created_at,updated_at,namespace,window_start,window_end,ready_at,contract_version,feature_schema_version,model_version,request_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                id.toString(),incidentId.toString(),requestKey.toString(),state,settings.enabled()?"AWAITING_EXECUTION":"MODEL_UNAVAILABLE",
+        db.update("""
+                INSERT INTO analysis_jobs(id,incident_id,automatic_environment_id,request_key,status,reason,created_at,updated_at,namespace,
+                    window_start,window_end,ready_at,contract_version,feature_schema_version,model_version,request_json)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, id.toString(),incidentId == null ? null : incidentId.toString(),incidentId == null ? environmentId : null,key.toString(),
+                settings.enabled()?"QUEUED":"BLOCKED_MODEL_UNAVAILABLE",settings.enabled()?"AWAITING_EXECUTION":"MODEL_UNAVAILABLE",
                 Timestamp.from(now),Timestamp.from(now),namespace,Timestamp.from(start),Timestamp.from(end),Timestamp.from(ready),
                 request.contractVersion(),request.featureSchemaVersion(),request.modelVersion(),mapper.writeValueAsString(request));
-        return get(environmentId,incidentId,id);
+        return id;
+    }
+
+    @Transactional
+    public void enqueueDue(Instant now) {
+        if (!settings.enabled()) return;
+        var due = db.queryForList("""
+                SELECT environment_id FROM monitoring_settings
+                WHERE enabled=true AND next_run_at<=? ORDER BY next_run_at,environment_id LIMIT 16
+                """,Long.class,Timestamp.from(now));
+        due.sort(Long::compareTo);
+        Instant end = Instant.ofEpochSecond(Math.floorDiv(now.getEpochSecond()-30,10)*10);
+        for (long env : due) {
+            // Use the same environment-first lock order as settings updates and recheck eligibility.
+            String namespace = db.queryForObject("SELECT namespace FROM environments WHERE id=? FOR UPDATE",String.class,env);
+            var intervals = db.queryForList("""
+                    SELECT interval_seconds FROM monitoring_settings
+                    WHERE environment_id=? AND enabled=true AND next_run_at<=? FOR UPDATE
+                    """,Integer.class,env,Timestamp.from(now));
+            if (intervals.isEmpty()) continue;
+            db.update("UPDATE monitoring_settings SET next_run_at=? WHERE environment_id=?",
+                    Timestamp.from(now.plusSeconds(intervals.getFirst())),env);
+            // After downtime, analyze the newest mature window and leave gaps visible.
+            var previous = db.queryForList("""
+                    SELECT id FROM analysis_jobs WHERE automatic_environment_id=?
+                    AND (window_end>=? OR status IN ('QUEUED','RUNNING')) LIMIT 1 FOR UPDATE
+                    """,String.class,env,Timestamp.from(end));
+            if (previous.isEmpty()) {
+                insert(env,null,UUID.randomUUID(),namespace,end.minusSeconds(30),end,end.plusSeconds(30),now);
+            }
+        }
     }
 
     public Job get(Long environmentId, UUID incidentId, UUID jobId) {
@@ -121,12 +161,19 @@ public class AnalysisJobs {
     @Transactional
     public Claim claimNext() {
         var now = Timestamp.from(Instant.now());
-        var candidates = db.query(JOIN + " WHERE j.status='QUEUED' AND j.ready_at<=? ORDER BY j.created_at,j.id LIMIT 1",this::row,now);
+        var candidates = db.query("""
+                SELECT j.id,j.incident_id,i.environment_id FROM analysis_jobs j LEFT JOIN incidents i ON i.id=j.incident_id
+                WHERE j.status='QUEUED' AND j.ready_at<=? ORDER BY j.created_at,j.id LIMIT 1
+                """,(r,n)->new Pending(r.getString(1),r.getString(2),r.getLong(3)),now);
         if (candidates.isEmpty()) return null;
         var job = candidates.getFirst();
-        // Use the same incident-first lock order as creation, cancellation and manual resolution.
-        var incident = incident(job.environmentId(),UUID.fromString(job.incidentId()),true);
-        if (incident.status().equals("RESOLVED")) { cancelForIncident(UUID.fromString(job.incidentId()),now.toInstant()); return null; }
+        if (job.incidentId()!=null) {
+            UUID incidentId = UUID.fromString(job.incidentId());
+            if (incident(job.environmentId(),incidentId,true).status().equals("RESOLVED")) {
+                cancelForIncident(incidentId,now.toInstant());
+                return null;
+            }
+        }
         now = Timestamp.from(Instant.now());
         String token = UUID.randomUUID().toString();
         var expiry = Timestamp.from(now.toInstant().plusSeconds(settings.timeoutSeconds()+30));

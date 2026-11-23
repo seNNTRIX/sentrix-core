@@ -25,7 +25,12 @@ public class AnalysisJobRunner {
         this.jobs=jobs; this.settings=settings; this.client=client; this.mapper=mapper; this.workerEnabled=workerEnabled;
     }
     @Scheduled(fixedDelay=1000, initialDelay=1000)
-    public void tick() { if (workerEnabled) runNext(); }
+    public void tick() {
+        if (workerEnabled) {
+            jobs.enqueueDue(java.time.Instant.now());
+            runNext();
+        }
+    }
 
     public void runNext() {
         jobs.recoverExpired();

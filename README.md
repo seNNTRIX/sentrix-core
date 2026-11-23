@@ -64,7 +64,7 @@ MySQL 데이터는 Compose의 `mysql-data` 볼륨에 남습니다. `docker compo
 3. 해당 ID로 서비스 목록·메트릭·로그·요청 추적 API를 호출합니다. 시간 조회에는 저장소에 데이터가 있는 최근 UTC 시각을 사용합니다.
 4. **Server response**가 실제 호출 결과입니다. 문서의 **Example Value**는 응답 형식 예시이며 실제 관측값이 아닙니다. POST/PUT의 Execute는 실제 설정을 저장하거나 연결 검사를 실행합니다.
 
-현재 구현한 29개 API를 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
+현재 구현한 30개 API를 문서화합니다. 한국어 기능 설명·조회 제한·오류 응답을 포함하며, 데이터 소스 종류와 메트릭 이름은 선택 목록으로 제공합니다. 서버와 같은 주소를 사용하므로 Swagger를 위해 CORS를 추가할 필요가 없습니다. 외부 Swagger 예시 문서와 외부 validator는 사용하지 않습니다. 기존 로컬 바인딩과 데이터 소스 허용 목록은 그대로 적용됩니다.
 
 Spring Boot 4용 `springdoc-openapi-starter-webmvc-ui:3.2.0`을 사용합니다. 참고: [공식 시작 문서](https://springdoc.org/#getting-started), [호환성 안내](https://springdoc.org/faq.html).
 
@@ -397,12 +397,12 @@ Loki는 namespace와 Deployment를 고정하고 최신 로그 한 건의 이벤�
 
 입력 400, 환경/trace 없음 404, Tempo 미설정 409, 저장소 실패 502/504, 중단 503은 기존 상세 조회 계약과 같다. 실제 환경 조회 성공 검증은 클러스터 복구 후 필요하다. 전체 기간 서비스 맵과 Deployment 매핑은 후속이다.
 
-## 분석 실행 설정 (모델 미연결)
+## 환경별 자동 분석
 
-- `GET /api/v1/environments/{id}/monitoring`: 저장된 설정 조회. 미설정 기본값은 enabled=false, intervalSeconds=60.
-- `PUT /api/v1/environments/{id}/monitoring`: `{ "enabled": true, "intervalSeconds": 60 }` 저장. 두 필드 필수, 간격 30~3600초. 환경 없음 404, 입력 오류 400.
-- enabled는 사용자의 실행 의도다. 모델 미연결이므로 true일 때 실행 상태는 BLOCKED_MODEL_UNAVAILABLE, false는 DISABLED다. lastSuccessfulAt은 null이다. 환경 주기 분석·자동 장애 생성은 구현 전이다. 수동으로 접수한 분석 작업을 실행하는 worker와 별개이며, 현재 monitoring 응답은 실제 모델 연결 상태를 검사하지 않는 기존 계약이다.
-- V3 migration으로 설정을 MySQL에 저장한다. 최초 동시 저장은 환경 행 잠금으로 직렬화한다.
+- `PUT /api/v1/environments/{id}/monitoring`에 `{"enabled":true,"intervalSeconds":60}`을 보내 시작한다. 허용 간격은 30~3600초다. V6 이전에 저장된 활성화 의도는 다시 저장해야 실행된다.
+- `GET /api/v1/environments/{id}/monitoring`은 설정, 다음 예약 시각 및 마지막 성공한 모델 응답 시각을 반환한다. 모델이 판정을 보류해도 유효한 응답이면 처리 완료 시각에 포함된다. SCHEDULED는 실행 예약 상태다. 모델 미설정·실행기 비활성·재활성 필요 상태를 구분한다.
+- Java가 수집 대기 30초가 지난 가장 최근의 10초 경계를 선택하고, 직전 30초를 분석한다. 동일 환경과 종료 시각은 한 번만 저장한다. 이미 접수된 작업이 있으면 그 주기는 건너뛴다. 재시작 후 비어 있는 과거 구간을 역산하거나 채우지 않는다. 중지하면 진행 중인 자동 요청의 늦은 결과도 폐기한다.
+- `GET /api/v1/environments/{id}/anomaly-scores?limit=20`은 최신 자동 구간을 반환한다(1~100개). 작업 ID, 구간, 모델 버전, 점수·판정·사유, 접수·시작·종료 시각과 대기 시간(queueWaitMs)·실행 시간(executionMs)을 제공한다. 점수가 없는 구간은 null이다. 장애 등록은 별도 단계다.
 
 ## Deployment 소속 Pod 목록
 
@@ -511,10 +511,6 @@ export SENTRIX_ANALYSIS_FEATURE_SCHEMA_VERSION=re2ob-v0-rel18-all58
 온라인 특징 데이터가 없으면 ABSTAIN/FEATURE_INPUT_UNAVAILABLE를 저장한다. 이는 추론 입력 준비 전 상태이며
 모델 원인 판정을 생성하지 않는다. 실제 특징값에 대한 모델 계산은 Python `/v1/score`로 제공한다.
 전체 실시간 RCA를 위해 온라인 원본조회·학습과 동일한 feature·정상 기준값·연속 구간 판정이 필요하다.
-
-기존 monitoring 설정은 모델 설정 시 `modelStatus=CONFIGURED`를 표시한다. 자동 분석 요청이 켜져 있으면
-`executionStatus=BLOCKED_AUTOMATIC_ANALYSIS_UNAVAILABLE`이며 실제 환경별 주기 실행은 남아 있다.
-
 
 ### 온라인 원본 조회 연결
 
