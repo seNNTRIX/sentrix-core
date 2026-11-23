@@ -546,6 +546,6 @@ JDK 21의 JAVA_HOME을 설정하고 로컬 MySQL·빌드된 대시보드·모델
 
 `GET /api/v1/environments/{environmentId}/incidents/{incidentId}/rca`는 저장된 이상 판정 중 관측 종료 시각이 가장 최근인 결과를 반환한다. result에는 jobId와 모델 버전·점수·후보·근거가 포함된다. 이상 판정이 없으면 result는 null이고, 잘못된 환경 또는 기록은 404다. 복구 시점의 정상 판정은 해당 작업 결과 API에서 따로 조회한다.
 
-`GET /api/v1/environments/{environmentId}/overview`는 환경 전체의 열린 장애 수(openIncidents), 조회 시각(queriedAt), 최근 자동 분석 구간(recentWindows, 기본 12개, 선택적 limit 1~100개)를 반환한다. 각 구간의 locations는 해당 시점 상위 세 후보의 순위·서비스 또는 호출 양 끝을 담는다. 수동·자동 열린 기록을 모두 센다. 관측 날짜가 지난 구간도 종료 시각을 그대로 표시한다. 서비스별 요청량·오류율·지연과 수집 신호 최신성은 각각 metrics와 collection-status API를 사용한다.
+`GET /api/v1/environments/{environmentId}/overview`는 환경 전체의 열린 장애 수(openIncidents), 조회 시각(queriedAt), 최근 자동 분석 구간(recentWindows, 기본 12개, 선택적 limit 1~100개)를 반환한다. from과 to를 함께 보내면 해당 시간대와 겹치는 모든 구간을 반환하며 최대 범위는 24시간이다. 기간을 지정하면 limit은 적용하지 않는다. 각 구간의 locations는 해당 시점 상위 세 후보의 순위·서비스 또는 호출 양 끝을 담는다. 수동·자동 열린 기록을 모두 센다. 관측 날짜가 지난 구간도 종료 시각을 그대로 표시한다. 서비스별 요청량·오류율·지연과 수집 신호 최신성은 각각 metrics와 collection-status API를 사용한다.
 
 Explore의 로그 발생량 API는 각 버킷의 전체 count와 함께 Loki의 detected_level 집계인 levels를 반환한다. 미관측 구간은 count=null이고 levels는 빈 객체다. 원문 없이도 레벨별 발생량을 그릴 수 있다. Trace 검색은 namedRoot(루트 이름 수집 여부 제한), minSpanMs(초과, 0~86400000), errorOnly, operation(정확히 일치) 조건을 선택적으로 받는다. 모두 같은 환경·서비스의 span에 적용하며 matchedSpans는 Tempo에서 해당 개수를 제공할 때만 반환한다.

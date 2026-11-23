@@ -85,10 +85,14 @@ class MonitoringController {
     @GetMapping("/anomaly-scores")
     List<Window> windows(@PathVariable Long environmentId,@RequestParam(defaultValue="20") @Min(1) @Max(100) int limit){
         check(environmentId);
+        return readWindows("ORDER BY window_end DESC LIMIT ?", environmentId, limit);
+    }
+
+    private List<Window> readWindows(String criteria, Object... args) {
         return db.query("""
                 SELECT id,detected_incident_id,window_start,window_end,status,reason,result_json,created_at,started_at,finished_at,model_version
-                FROM analysis_jobs WHERE automatic_environment_id=? ORDER BY window_end DESC LIMIT ?
-                """,(r,n)->{
+                FROM analysis_jobs WHERE automatic_environment_id=?
+                """ + criteria,(r,n)->{
             var json=r.getString("result_json");
             var result=json==null?null:mapper.readValue(json,AnalysisProtocol.Response.class);
             Instant created=instant(r.getTimestamp("created_at")),started=instant(r.getTimestamp("started_at")),finished=instant(r.getTimestamp("finished_at"));
@@ -98,14 +102,22 @@ class MonitoringController {
                     r.getString("model_version"),created,started,finished,elapsed(created,started),elapsed(started,finished),r.getString("detected_incident_id"),
                     result == null || result.candidates() == null ? List.of() : result.candidates().stream()
                             .limit(3).map(c -> new Location(c.rank(), c.kind(), c.service(), c.source(), c.target())).toList());
-        },environmentId,limit);
+        },args);
     }
 
-    @Operation(summary="환경 장애와 최근 자동 분석 요약",description="환경 전체의 열린 장애 수와 최신 자동 분석 12개를 관측 종료 시각 내림차순으로 조회합니다. 서비스별 RED 지표는 metrics API에서 선택한 기간으로 조회합니다.")
+    @Operation(summary="환경 장애와 최근 자동 분석 요약",description="from·to를 함께 지정하면 최대 24시간 동안 겹치는 모든 분석 구간을 반환합니다. 생략하면 최근 구간을 반환합니다. 서비스별 RED 지표는 metrics API에서 선택한 기간으로 조회합니다.")
     @GetMapping("/overview")
     @Transactional(readOnly=true)
-    Overview overview(@PathVariable Long environmentId, @RequestParam(defaultValue="12") @Min(1) @Max(100) int limit) {
-        var recent = windows(environmentId, limit);
+    Overview overview(@PathVariable Long environmentId, @RequestParam(defaultValue="12") @Min(1) @Max(100) int limit,
+                      @RequestParam(required=false) Instant from, @RequestParam(required=false) Instant to) {
+        if ((from == null) != (to == null) || from != null &&
+                (!from.isBefore(to) || Duration.between(from, to).compareTo(Duration.ofDays(1)) > 0))
+            throw PrometheusClient.error(HttpStatus.BAD_REQUEST,"INVALID_TIME_RANGE","Provide a range of up to 24 hours");
+        check(environmentId);
+        var recent = from == null
+                ? readWindows("ORDER BY window_end DESC LIMIT ?", environmentId, limit)
+                : readWindows("AND window_end > ? AND window_start < ? ORDER BY window_end DESC",
+                        environmentId, Timestamp.from(from), Timestamp.from(to));
         long open = db.queryForObject("SELECT COUNT(*) FROM incidents WHERE environment_id=? AND status='OPEN'",
                 Long.class, environmentId);
         return new Overview(environmentId, Instant.now(), open, recent);

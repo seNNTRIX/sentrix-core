@@ -203,6 +203,12 @@ class AnalysisExecutionTests {
             }
             first = first.plusSeconds(60);
         }
+        String overview = "/api/v1/environments/" + environmentId + "/overview";
+        mvc.perform(get(overview).param("from","2026-01-01T00:00:00Z")
+                        .param("to","2026-01-01T01:00:00Z").param("limit","1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.recentWindows.length()").value(4));
+        mvc.perform(get(overview).param("from","2026-01-01T00:00:00Z"))
+                .andExpect(status().isBadRequest());
         mvc.perform(get(path(record))).andExpect(jsonPath("$.totalElements").value(3));
         mvc.perform(patch(base+"/"+record).contentType("application/json").content("{\"status\":\"OPEN\"}"))
                 .andExpect(status().isConflict());
