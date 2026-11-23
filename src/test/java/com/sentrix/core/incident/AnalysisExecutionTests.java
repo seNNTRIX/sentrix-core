@@ -114,6 +114,8 @@ class AnalysisExecutionTests {
     @AfterEach
     void clean() {
         if (release != null) release.countDown();
+        db.update("DELETE FROM analysis_jobs WHERE automatic_environment_id=?", environmentId);
+        db.update("DELETE FROM monitoring_settings WHERE environment_id=?", environmentId);
         db.update("DELETE FROM analysis_jobs WHERE incident_id IN (SELECT id FROM incidents WHERE environment_id=?)", environmentId);
         db.update("DELETE FROM incidents WHERE environment_id=?", environmentId);
         environments.deleteById(environmentId);
@@ -147,6 +149,50 @@ class AnalysisExecutionTests {
     String path(String incidentId) { return base + "/" + incidentId + "/rca-jobs"; }
     static JsonNode read(String value) { return json.readTree(value); }
     String state(String id) { return db.queryForObject("SELECT status FROM analysis_jobs WHERE id=?", String.class, id); }
+
+    @Test
+    void automaticAlertsRetainEvidenceAndCloseOnlyOnNormal() throws Exception {
+        var first = Instant.parse("2026-01-01T00:02:00Z");
+        db.update("INSERT INTO monitoring_settings(environment_id,enabled,interval_seconds,updated_at,next_run_at) VALUES(?,true,60,?,?)",
+                environmentId, Timestamp.from(first), Timestamp.from(first));
+        String record = null;
+        for (var decision : java.util.List.of("ANOMALY", "ANOMALY", "ABSTAIN", "NORMAL")) {
+            jobs.enqueueDue(first);
+            var req = read(db.queryForObject("SELECT request_json FROM analysis_jobs WHERE automatic_environment_id=? AND status='QUEUED'",
+                    String.class, environmentId));
+            var body = json.readTree(successfulResponse(req)).deepCopy();
+            var response = (tools.jackson.databind.node.ObjectNode) body;
+            response.put("decision", decision);
+            if (decision.equals("ANOMALY")) {
+                response.putArray("candidates").addObject().put("rank",1).put("kind","EDGE").putNull("service")
+                        .put("source","frontend").put("target","productcatalogservice").put("faultType","호출 경로")
+                        .put("score",0.8).putArray("evidence").add("호출 지연 증가");
+            } else if (decision.equals("ABSTAIN")) {
+                response.put("abstainReason","INSUFFICIENT_METRIC_SAMPLES");
+                response.putNull("score");
+            }
+            responseOverride.set(response.toString());
+            runner.runNext();
+            assertThat(db.queryForObject("SELECT reason FROM analysis_jobs WHERE id=?", String.class, req.path("jobId").asText())).isEqualTo("COMPLETED");
+            var page = read(mvc.perform(get(base)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+            assertThat(page.path("totalElements").asInt()).isEqualTo(1);
+            var item = page.path("items").get(0);
+            if (record == null) record = item.path("id").asText();
+            assertThat(item.path("id").asText()).isEqualTo(record);
+            assertThat(item.path("source").asText()).isEqualTo("AUTOMATIC");
+            assertThat(item.path("status").asText()).isEqualTo(decision.equals("NORMAL") ? "RESOLVED" : "OPEN");
+            if (!decision.equals("ABSTAIN")) {
+                String jobId = req.path("jobId").asText();
+                mvc.perform(get(path(record)+"/"+jobId+"/result")).andExpect(status().isOk())
+                        .andExpect(jsonPath("$.decision").value(decision));
+            }
+            first = first.plusSeconds(60);
+        }
+        mvc.perform(get(path(record))).andExpect(jsonPath("$.totalElements").value(3));
+        mvc.perform(patch(base+"/"+record).contentType("application/json").content("{\"status\":\"OPEN\"}"))
+                .andExpect(status().isConflict());
+        mvc.perform(get("/api/v1/environments/"+otherId+"/incidents/"+record)).andExpect(status().isNotFound());
+    }
 
     @Test
     void latestWindowIsPinnedByServerAndRetryReturnsTheSameJob() throws Exception {

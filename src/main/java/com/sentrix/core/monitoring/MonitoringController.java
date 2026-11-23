@@ -86,7 +86,7 @@ class MonitoringController {
     List<Window> windows(@PathVariable Long environmentId,@RequestParam(defaultValue="20") @Min(1) @Max(100) int limit){
         check(environmentId);
         return db.query("""
-                SELECT id,window_start,window_end,status,reason,result_json,created_at,started_at,finished_at,model_version
+                SELECT id,detected_incident_id,window_start,window_end,status,reason,result_json,created_at,started_at,finished_at,model_version
                 FROM analysis_jobs WHERE automatic_environment_id=? ORDER BY window_end DESC LIMIT ?
                 """,(r,n)->{
             var json=r.getString("result_json");
@@ -95,7 +95,7 @@ class MonitoringController {
             String reason=result!=null && result.abstainReason()!=null?result.abstainReason():r.getString("reason");
             return new Window(r.getString("id"),instant(r.getTimestamp("window_start")),instant(r.getTimestamp("window_end")),
                     r.getString("status"),reason,result==null?null:result.score(),result==null?null:result.decision(),
-                    r.getString("model_version"),created,started,finished,elapsed(created,started),elapsed(started,finished));
+                    r.getString("model_version"),created,started,finished,elapsed(created,started),elapsed(started,finished),r.getString("detected_incident_id"));
         },environmentId,limit);
     }
 
@@ -106,5 +106,5 @@ class MonitoringController {
     record Settings(@NotNull Boolean enabled,@NotNull @Min(30) @Max(3600) Integer intervalSeconds){}
     record State(Long environmentId,boolean enabled,int intervalSeconds,String executionStatus,String modelStatus,Instant lastSuccessfulAt,Instant updatedAt,Instant nextRunAt){}
     record Window(String jobId,Instant windowStart,Instant windowEnd,String status,String reason,Double score,AnalysisProtocol.Decision decision,
-                  String modelVersion,Instant createdAt,Instant startedAt,Instant finishedAt,Long queueWaitMs,Long executionMs){}
+                  String modelVersion,Instant createdAt,Instant startedAt,Instant finishedAt,Long queueWaitMs,Long executionMs,String incidentId){}
 }

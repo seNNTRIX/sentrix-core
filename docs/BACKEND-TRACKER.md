@@ -68,8 +68,8 @@
 | API-21 | [x] 시작·중지 및 주기 설정 | `PUT /api/v1/environments/{id}/monitoring` | 자동 분석 활성화·중지 및 주기 저장. 모델 버전은 서버 설정 | BE-08, BE-09 |
 | API-22 | [x] 원시 점수·보류 사유 조회 | `GET /api/v1/environments/{id}/anomaly-scores` | 자동 분석 구간·점수·판정·사유·모델 버전·대기/실행 시간 조회. 임계값은 후속 | BE-10~13, 모델 연동 |
 | API-23 | [ ] 대기 | `GET /api/v1/environments/{id}/service-status/history` | 서비스별 정상·경고·이상·미판정 구간 반환 | BE-12, BE-13, ISS-05 |
-| API-24 | [x] 수동 기록 범위 | `GET /api/v1/environments/{id}/incidents` | 기간·서비스·상태별 장애 목록 페이지 조회 | BE-13 |
-| API-25 | [x] 수동 기록 범위 | `GET /api/v1/environments/{id}/incidents/{incidentId}` | 장애 시각·영향 서비스·분석 진행 상태 조회 | BE-13 |
+| API-24 | [x] 자동·수동 기록 | `GET /api/v1/environments/{id}/incidents` | 기간·서비스·상태별 장애 목록 페이지 조회 | BE-13 |
+| API-25 | [x] 자동·수동 기록 | `GET /api/v1/environments/{id}/incidents/{incidentId}` | 장애 시각·영향 서비스·분석 진행 상태 조회 | BE-13 |
 | API-26 | [ ] 대기 | `POST /api/v1/environments/{id}/incidents/{incidentId}/acknowledgements` | 사용자 확인 기록 저장; 자동 회복 판정과 구분 | BE-13, 사용자 식별 방식 |
 | API-27 | [ ] 보류 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca` | 원인 서비스·연결 순위, 근거, 중간·최종 결과 반환 | BE-11~13, 모델 연동 |
 | API-28 | [x] 수동 실행 범위 | `POST /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs` | 분석 구간 고정·작업 접수·중복 방지·기본 미연결; 설정된 서버로 수동 작업 실행 | BE-08, BE-11, BE-13 |
@@ -93,7 +93,7 @@
 | API-39 | [x] 완료 | `PATCH /api/v1/environments/{id}/incidents/{incidentId}` | 수동 종료·재개, 종료 시 대기 작업 취소 | BE-13 |
 | API-40 | [x] 완료 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs` | 분석 요청 이력 페이지 조회 | BE-13 |
 | API-41 | [x] 완료 | `POST /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs/{jobId}/cancel` | 미연결·대기·실행 중 요청 취소; 늦은 결과 차단 | BE-13 |
-| API-42 | [x] 수동 결과 범위 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs/{jobId}/result` | 검증 후 저장한 성공 작업의 판정·순위·근거 조회; 미결과 409 | BE-11/13 |
+| API-42 | [x] 자동·수동 결과 조회 | `GET /api/v1/environments/{id}/incidents/{incidentId}/rca-jobs/{jobId}/result` | 검증 후 저장한 성공 작업의 판정·순위·근거 조회; 미결과 409 | BE-11/13 |
 
 회원가입·비밀번호 재설정·팀 초대·알림 규칙·감사 이력·환경 삭제는 필요 시 세부 계약을 정한다. 화면에 존재한다는 이유만으로 이번 졸작 시연의 필수 범위로 확정하지 않는다. 부하 생성·장애 주입은 우선 별도 데모 도구로 실행하며, 제품이 계속 관측하는 기능과 분리한다.
 
@@ -459,3 +459,10 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 - 로컬 데모에서 Kubernetes 관리 지표와 Prometheus 자체 지표를 60초마다 수집하도록 분리했다. 컨테이너 지표는 5초 간격을 유지했다. 런타임 설정 반영 후 일시적으로 수집에 성공했지만 16:35 KST에도 cAdvisor 응답 시간 초과가 반복됐다. 16:35:00~16:35:30 창은 대상 지표 전체 누락으로 보류됐다. 자동 분석 수치 점수 및 안정적인 수집은 검증 중이다.
 - 특징 패키지 7개, 모델 서버 24개 테스트 통과. 원본 지표가 없는 시각에 점수나 정상 판정을 채우지 않는다.
 - 이후 팀 모델 서버의 보정·연속 두 구간 판정 및 NODE/EDGE 후보 코드와 통합했다. 부족한 표본 로그는 실제로 부족한 구간의 종료 시각을 기록한다. 통합 후 특징 8개·모델 서버 30개 테스트 통과. 현재 실행 중인 로컬 서버의 경보 보정 적용 또는 실데이터 자동 장애 생성을 의미하지 않는다.
+
+
+### 2026-11-23 · BE-13/API-22/24/25/42 자동 장애 이력과 복구 기록
+
+- 자동 작업의 이상 응답, 장애 이력 생성, 후속 작업 연결을 같은 트랜잭션에 저장한다. 환경별 반복 이상은 기존 기록에 붙이고 정상 응답은 종료한다. 보류·실패는 상태를 바꾸지 않는다. 수동 작업과 기존 기록의 등록 방식을 유지한다.
+- 문제: 프론트가 MANUAL만 허용하고 Java 조회가 수동 작업만 조인했다. 등록 방식과 감지 이력 참조를 V7에 추가하고, 장애 상세에서 같은 저장 결과 API로 모델의 점수·후보·근거를 열도록 연결했다. 종료 시각은 모델이 정상으로 본 구간의 종료 시각이다.
+- Java 76개, 프론트 25개 테스트 통과, 양쪽 빌드 성공. 통제된 응답으로 반복 이상 → 보류 → 정상, 이력 격리와 결과 조회를 검증했다. 실제 맥북 MySQL에 V7 적용 후 대시보드 경유로 기존 수동 기록 5건, 상태 API, Swagger를 확인했다. 브라우저에서 이전 실측값 0.003018791874353208과 보류 사유를 확인했다. 자동 장애의 실측 검증과 구분한다.

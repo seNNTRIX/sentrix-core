@@ -17,7 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class AnalysisJobs {
-    private static final String JOIN = "SELECT j.*, i.environment_id FROM analysis_jobs j JOIN incidents i ON i.id=j.incident_id";
+    private static final String JOIN = "SELECT j.*, i.id AS linked_incident_id, i.environment_id FROM analysis_jobs j JOIN incidents i ON i.id=COALESCE(j.incident_id,j.detected_incident_id)";
     private static final String ACTIVE = "('BLOCKED_MODEL_UNAVAILABLE','QUEUED','RUNNING')";
     private final JdbcTemplate db;
     private final AnalysisModelSettings settings;
@@ -39,7 +39,7 @@ public class AnalysisJobs {
         var value = r.getTimestamp(column); return value == null ? null : value.toInstant();
     }
     private Job row(ResultSet r, int n) throws SQLException {
-        return new Job(r.getString("id"), r.getString("incident_id"), r.getLong("environment_id"),
+        return new Job(r.getString("id"), r.getString("linked_incident_id"), r.getLong("environment_id"),
                 r.getString("status"), r.getString("reason"), time(r,"created_at"), time(r,"updated_at"),
                 r.getString("namespace"), time(r,"window_start"), time(r,"window_end"), time(r,"ready_at"),
                 r.getString("contract_version"), r.getString("feature_schema_version"), r.getString("model_version"),
@@ -134,8 +134,8 @@ public class AnalysisJobs {
     }
     public JobPage list(Long environmentId, UUID incidentId, int page, int size) {
         incident(environmentId,incidentId,false);
-        long count = db.queryForObject("SELECT COUNT(*) FROM analysis_jobs WHERE incident_id=?",Long.class,incidentId.toString());
-        var rows = db.query(JOIN + " WHERE j.incident_id=? ORDER BY j.created_at DESC,j.id DESC LIMIT ? OFFSET ?",this::row,incidentId.toString(),size,(long)page*size);
+        long count = db.queryForObject("SELECT COUNT(*) FROM analysis_jobs WHERE incident_id=? OR detected_incident_id=?",Long.class,incidentId.toString(),incidentId.toString());
+        var rows = db.query(JOIN + " WHERE i.id=? ORDER BY j.created_at DESC,j.id DESC LIMIT ? OFFSET ?",this::row,incidentId.toString(),size,(long)page*size);
         return new JobPage(rows,page,size,count,(count+size-1)/size);
     }
     @Transactional
@@ -190,6 +190,13 @@ public class AnalysisJobs {
     }
     @Transactional
     public void finish(Claim claim, AnalysisProtocol.Response result, String failureCode) {
+        Long environment = null;
+        if (result != null && result.decision() != AnalysisProtocol.Decision.ABSTAIN) {
+            environment = db.queryForObject("SELECT automatic_environment_id FROM analysis_jobs WHERE id=?", Long.class, claim.jobId());
+            if (environment != null) {
+                db.queryForObject("SELECT id FROM environments WHERE id=? FOR UPDATE", Long.class, environment);
+            }
+        }
         // Refresh the clock after acquiring the lock; database lock waits can outlive a claim.
         var leases = db.query("SELECT lease_expires_at FROM analysis_jobs WHERE id=? AND status='RUNNING' AND claim_token=? FOR UPDATE",
                 (r,n) -> r.getTimestamp(1),claim.jobId(),claim.token());
@@ -200,8 +207,39 @@ public class AnalysisJobs {
             return;
         }
         // A cancelled or expired claim cannot publish a late model response.
-        db.update("UPDATE analysis_jobs SET status=?,reason=?,result_json=?,updated_at=?,finished_at=?,claim_token=NULL,lease_expires_at=NULL WHERE id=? AND status='RUNNING' AND claim_token=? AND lease_expires_at>?",
+        int published = db.update("UPDATE analysis_jobs SET status=?,reason=?,result_json=?,updated_at=?,finished_at=?,claim_token=NULL,lease_expires_at=NULL WHERE id=? AND status='RUNNING' AND claim_token=? AND lease_expires_at>?",
                 result == null ? "FAILED" : "SUCCEEDED",result == null ? failureCode : "COMPLETED",
                 result == null ? null : mapper.writeValueAsString(result),now,now,claim.jobId(),claim.token(),now);
+        if (published == 1 && environment != null) {
+            recordDetection(environment, result, now);
+        }
+    }
+
+    private void recordDetection(long environment, AnalysisProtocol.Response result, Timestamp now) {
+        // The scheduler permits one active automatic job per environment. The job lock is held until commit.
+        var open = db.queryForList("SELECT id FROM incidents WHERE environment_id=? AND source='AUTOMATIC' AND status='OPEN' FOR UPDATE",
+                String.class, environment);
+        String incidentId;
+        var observedAt = Timestamp.from(result.windowEnd());
+        if (open.isEmpty()) {
+            if (result.decision() == AnalysisProtocol.Decision.NORMAL) return;
+            incidentId = UUID.randomUUID().toString();
+            var first = result.candidates().getFirst();
+            boolean edge = first.kind() == AnalysisProtocol.CandidateKind.EDGE;
+            String service = edge ? first.source() : first.service();
+            String candidate = edge ? first.source() + " → " + first.target() : service;
+            db.update("""
+                    INSERT INTO incidents(id,environment_id,request_key,service,title,description,occurred_at,created_at,status,source)
+                    VALUES(?,?,?,?,?,?,?,?,'OPEN','AUTOMATIC')
+                    """, incidentId, environment, UUID.randomUUID().toString(), service, "모델 이상 감지",
+                    "최초 판정의 원인 후보 1순위 · " + candidate, observedAt, now);
+        } else {
+            incidentId = open.getFirst();
+            if (result.decision() == AnalysisProtocol.Decision.NORMAL) {
+                db.update("UPDATE incidents SET status='RESOLVED',resolved_at=? WHERE id=?", observedAt, incidentId);
+                cancelForIncident(UUID.fromString(incidentId), now.toInstant());
+            }
+        }
+        db.update("UPDATE analysis_jobs SET detected_incident_id=? WHERE id=?", incidentId, result.jobId().toString());
     }
 }

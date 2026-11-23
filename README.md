@@ -402,7 +402,7 @@ Loki는 namespace와 Deployment를 고정하고 최신 로그 한 건의 이벤�
 - `PUT /api/v1/environments/{id}/monitoring`에 `{"enabled":true,"intervalSeconds":60}`을 보내 시작한다. 허용 간격은 30~3600초다. V6 이전에 저장된 활성화 의도는 다시 저장해야 실행된다.
 - `GET /api/v1/environments/{id}/monitoring`은 설정, 다음 예약 시각 및 마지막 성공한 모델 응답 시각을 반환한다. 모델이 판정을 보류해도 유효한 응답이면 처리 완료 시각에 포함된다. SCHEDULED는 실행 예약 상태다. 모델 미설정·실행기 비활성·재활성 필요 상태를 구분한다.
 - Java가 수집 대기 30초가 지난 가장 최근의 10초 경계를 선택하고, 직전 30초를 분석한다. 동일 환경과 종료 시각은 한 번만 저장한다. 이미 접수된 작업이 있으면 그 주기는 건너뛴다. 재시작 후 비어 있는 과거 구간을 역산하거나 채우지 않는다. 중지하면 진행 중인 자동 요청의 늦은 결과도 폐기한다.
-- `GET /api/v1/environments/{id}/anomaly-scores?limit=20`은 최신 자동 구간을 반환한다(1~100개). 작업 ID, 구간, 모델 버전, 점수·판정·사유, 접수·시작·종료 시각과 대기 시간(queueWaitMs)·실행 시간(executionMs)을 제공한다. 점수가 없는 구간은 null이다. 장애 등록은 별도 단계다.
+- `GET /api/v1/environments/{id}/anomaly-scores?limit=20`은 최신 자동 구간을 반환한다(1~100개). 작업 ID, 구간, 모델 버전, 점수·판정·사유, 접수·시작·종료 시각과 대기 시간(queueWaitMs)·실행 시간(executionMs)을 제공한다. 점수가 없는 구간은 null이다. 자동 이상·종료 구간은 incidentId로 장애 상세와 연결된다.
 
 ## Deployment 소속 Pod 목록
 
@@ -519,3 +519,10 @@ export SENTRIX_ANALYSIS_FEATURE_SCHEMA_VERSION=re2ob-v0-rel18-all58
 Java에는 `SENTRIX_ANALYSIS_TIMEOUT_SECONDS=60`을 설정한다. 30초 구간·버전 요청 계약은 같다.
 실시간 feature 준비 시에는 sentrix-features 패키지의 학습 함수 보존 사본을 사용한다.
 품질 실패는 `ABSTAIN`의 구체적 사유로 저장·표시한다. 전체 자동 탐지·실제 RCA 정확도 검증은 후속이다.
+
+
+### 자동 감지 기록
+
+자동 작업에서 검증된 ANOMALY를 받으면 환경별로 장애 기록을 열고, 이어지는 이상 구간들을 같은 기록에 연결한다. 다음 NORMAL에서 해당 기록을 종료한다. ABSTAIN이나 조회 실패는 상태를 바꾸지 않는다. 발생·종료 시각은 해당 판정 구간의 끝이며 실제 물리적 장애 시각의 추정값이 아니다. 최초 원인 후보가 연결이면 service 필드는 호출한 서비스를 담고, 경로 양쪽은 작업 결과에서 조회한다. 기존 수동 기록은 MANUAL, 자동 기록은 AUTOMATIC이다. 자동 기록의 상태는 모델이 관리한다.
+
+구간 점수 이력의 incidentId 또는 장애 목록에서 상세로 이동하면 rca-jobs와 기존 결과 API에서 당시 후보와 근거를 조회할 수 있다. 수동 재분석은 자동 기록을 생성하거나 종료하지 않는다.

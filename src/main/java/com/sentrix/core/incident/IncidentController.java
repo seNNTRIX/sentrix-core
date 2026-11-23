@@ -32,7 +32,7 @@ class IncidentController {
  record IncidentPage(List<IncidentView> items,int page,int size,long totalElements,long totalPages) {}
  private static Timestamp ts(Instant t){return Timestamp.from(t.truncatedTo(ChronoUnit.MICROS));}
  private static Instant instant(java.sql.ResultSet r,String name)throws java.sql.SQLException {var t=r.getTimestamp(name);return t==null?null:t.toInstant();}
- private IncidentView row(java.sql.ResultSet r,int n)throws java.sql.SQLException {return new IncidentView(r.getString("id"),r.getLong("environment_id"),"MANUAL",r.getString("service"),r.getString("title"),r.getString("description"),instant(r,"occurred_at"),instant(r,"created_at"),IncidentStatus.valueOf(r.getString("status")),instant(r,"resolved_at"));}
+ private IncidentView row(java.sql.ResultSet r,int n)throws java.sql.SQLException {return new IncidentView(r.getString("id"),r.getLong("environment_id"),r.getString("source"),r.getString("service"),r.getString("title"),r.getString("description"),instant(r,"occurred_at"),instant(r,"created_at"),IncidentStatus.valueOf(r.getString("status")),instant(r,"resolved_at"));}
  private void environment(Long id,boolean lock){if(db.queryForList("SELECT id FROM environments WHERE id=?"+(lock?" FOR UPDATE":""),id).isEmpty())throw error(HttpStatus.NOT_FOUND,"ENVIRONMENT_NOT_FOUND");}
  private static org.springframework.web.server.ResponseStatusException error(HttpStatus status,String code){return PrometheusClient.error(status,code,code);}
  private IncidentView incident(Long env,UUID id,boolean lock){var rows=db.query("SELECT * FROM incidents WHERE environment_id=? AND id=?"+(lock?" FOR UPDATE":""),this::row,env,id.toString());if(rows.isEmpty())throw error(HttpStatus.NOT_FOUND,"INCIDENT_NOT_FOUND");return rows.getFirst();}
@@ -42,10 +42,10 @@ class IncidentController {
  IncidentView create(@PathVariable Long environmentId,@Valid @RequestBody IncidentInput input){
   environment(environmentId,true);
   var prior=db.query("SELECT * FROM incidents WHERE environment_id=? AND request_key=?",this::row,environmentId,input.requestKey().toString());
-  if(!prior.isEmpty()){var x=prior.getFirst();if(!x.service().equals(input.service())||!x.title().equals(input.title().strip())||!x.description().equals(input.description())||!x.occurredAt().equals(ts(input.occurredAt()).toInstant()))throw error(HttpStatus.CONFLICT,"IDEMPOTENCY_CONFLICT");return x;}
+  if(!prior.isEmpty()){var x=prior.getFirst();if(!x.source().equals("MANUAL")||!x.service().equals(input.service())||!x.title().equals(input.title().strip())||!x.description().equals(input.description())||!x.occurredAt().equals(ts(input.occurredAt()).toInstant()))throw error(HttpStatus.CONFLICT,"IDEMPOTENCY_CONFLICT");return x;}
   UUID id=UUID.randomUUID();db.update("INSERT INTO incidents(id,environment_id,request_key,service,title,description,occurred_at,created_at,status) VALUES(?,?,?,?,?,?,?,?,?)",id.toString(),environmentId,input.requestKey().toString(),input.service(),input.title().strip(),input.description(),ts(input.occurredAt()),ts(Instant.now()),"OPEN");return incident(environmentId,id,false);
  }
- @Operation(summary="장애 기록 목록",description="발생 시각 내림차순. from 포함/to 제외, 서비스·OPEN/RESOLVED 선택 필터. page 0부터, size 최대 50. 수동 기록이며 모델의 장애 판정이 아닙니다.")
+ @Operation(summary="장애 기록 목록",description="발생 시각 내림차순. from 포함/to 제외, 서비스·OPEN/RESOLVED 선택 필터. page 0부터, size 최대 50. 등록 방식은 MANUAL 또는 AUTOMATIC입니다.")
  @GetMapping
  IncidentPage list(@PathVariable Long environmentId,@RequestParam(defaultValue="0") @Min(0) @Max(1000000) int page,@RequestParam(defaultValue="20") @Min(1) @Max(50) int size,@RequestParam(required=false) String service,@RequestParam(required=false) IncidentStatus status,@RequestParam(required=false) Instant from,@RequestParam(required=false) Instant to){
   environment(environmentId,false);if(from!=null&&to!=null&&!from.isBefore(to))throw error(HttpStatus.BAD_REQUEST,"INVALID_QUERY");
@@ -61,6 +61,7 @@ class IncidentController {
  @PatchMapping("/{incidentId}") @Transactional
  IncidentView update(@PathVariable Long environmentId,@PathVariable UUID incidentId,@Valid @RequestBody IncidentUpdate input){
   var x=incident(environmentId,incidentId,true);if(x.status()==input.status())return x;
+  if(x.source().equals("AUTOMATIC"))throw error(HttpStatus.CONFLICT,"AUTOMATIC_INCIDENT_MODEL_MANAGED");
   var now=ts(Instant.now());db.update("UPDATE incidents SET status=?,resolved_at=? WHERE id=?",input.status().name(),input.status()==IncidentStatus.RESOLVED?now:null,incidentId.toString());
   if(input.status()==IncidentStatus.RESOLVED)jobs.cancelForIncident(incidentId,now.toInstant());
   return incident(environmentId,incidentId,false);
