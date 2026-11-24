@@ -49,7 +49,7 @@
 | API-07 | [x] 완료 | `POST /api/v1/environments/{id}/data-sources/{type}/test` | 저장소 readiness 검사·결과 저장 | DataSourceController, DataSourceApiTests |
 | API-08 | [x] 완료 | `GET /api/v1/environments/{id}/services` | 현재 namespace의 Deployment 목록 조회 | TelemetryController, TelemetryApiTests |
 | API-09 | [x] 완료 | `GET /api/v1/environments/{id}/services/{service}/status` | 목표·현재·준비·가용 Pod 수와 수집 시각 조회 | DeploymentStatusController, TelemetryApiTests |
-| API-10 | [x] 완료 | `GET /api/v1/environments/{id}/metrics` | CPU·메모리·요청량·오류율·p50/p90/p99 시계열 조회 | TelemetryController, TelemetryApiTests, PromqlTests |
+| API-10 | [x] 완료 | `GET /api/v1/environments/{id}/metrics` | CPU·메모리·요청량·오류율·지연, 가용·목표 복제본과 CPU 한도·제한 비율 시계열 조회 | TelemetryController, TelemetryApiTests, PromqlTests |
 | API-11 | [x] 완료 | `GET /api/v1/environments/{id}/logs` | 서비스·기간·문자열별 로그 검색 | LogController, LogApiTests |
 | API-12 | [x] 완료 | `GET /api/v1/environments/{id}/traces` | 서비스·기간별 요청 추적 검색 | TraceController, TraceApiTests |
 | API-13 | [x] 완료 | `GET /api/v1/environments/{id}/traces/{traceId}` | 요청의 처리 구간·부모 관계·소요 시간 조회 | TraceController, TraceApiTests |
@@ -544,3 +544,9 @@ Pod별 지표, 로그 집계, 개요 집계 API는 관측 화면 요구에 맞�
 ### 2026-11-24 · API-19 기간 조회
 
 홈이 최근 100건만 읽어서 3시간 조회의 앞부분이 누락됐다. overview에 최대 24시간의 구간 겹침 조회를 추가했다. 기존 limit 조회, 기간 조회 및 잘못된 기간 입력을 테스트했다. 시드니 배포 후 공개 화면의 3시간 조회에서 실제 359건(정상 288, 이상 64, 보류 7)을 확인했다.
+
+### 2026-11-24 · API-10 서비스 원인 후보의 관측 근거
+
+장애 상세에서 서비스 내부 후보마다 CPU 코어 수만 그려 Pod 중단과 CPU 한도 초과를 구별하기 어려웠다. 기존 서비스 시계열 API에 가용·목표 복제본 수, CPU 한도 사용률 및 CFS 실행 제한 주기 비율을 추가했다. 범위와 namespace는 기존 조회 계약을 사용한다. 지표가 0으로 관측된 경우와 수집되지 않은 지점을 구분한다.
+
+시드니에 보존된 장애 구간에 실제 조회식을 적용했다. 결제 서비스의 5초 간격 표본 61개에서 목표 복제본은 1개였고 가용 복제본은 1→0→1개였다. 상품목록 CPU 장애 첫 경보 직전 두 표본에서 CPU 한도 사용률은 99.5%와 100.7%, 제한 주기 비율은 71.9%와 92.2%였다. Prometheus 3.5 실제 엔진으로 소유 Deployment 분리, 가용 0, 미관측, 중복 수집 및 불일치 제외를 검증했다. 백엔드 전체 테스트 81건과 Swagger의 11개 지표 계약이 통과했고 배포용 JAR의 클래스 89개가 테스트한 클래스와 일치했다. 새 API의 시드니 배포 및 화면 연결은 별도 검증 항목이다.

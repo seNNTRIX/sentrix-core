@@ -68,8 +68,10 @@ class PromqlTests {
         var yaml = new StringBuilder(fixtures);
         String[] expected = {"3", "300", "4", "0.25", "100", "380", "488"};
         int index = 0;
-        for (var definition : MetricDefinition.values()) {
-            String label = index < 2 ? "deployment" : "service_name";
+        for (var definition : java.util.List.of(MetricDefinition.cpu_usage_cores, MetricDefinition.memory_working_set_bytes,
+                MetricDefinition.request_rate, MetricDefinition.error_ratio, MetricDefinition.latency_p50_ms,
+                MetricDefinition.latency_p90_ms, MetricDefinition.latency_p99_ms)) {
+            String label = definition.serviceLabel;
             yaml.append(check(definition, "frontend", "{" + label + "=\"frontend\"}", expected[index++]));
         }
         yaml.append(check(MetricDefinition.error_ratio, "clean", "{service_name=\"clean\"}", "0"));
@@ -101,16 +103,52 @@ class PromqlTests {
                         .append("\"}'\n            value: ").append(stat.equals("observedAt") ? 0 : 2).append("\n");
             }
         }
+        for (var replica : java.util.List.of(MetricDefinition.available_replicas, MetricDefinition.desired_replicas)) {
+            yaml.append(check(replica, "frontend", null, null)); // both scrapes over a minute old
+        }
+        yaml.append("""
+                  - interval: 5s
+                    input_series:
+                      - series: 'kube_deployment_status_replicas_available{namespace="sentrix",deployment="frontend"}'
+                        values: '0+0x24'
+                      - series: 'kube_deployment_spec_replicas{namespace="sentrix",deployment="frontend"}'
+                        values: '1+0x24'
+                      - series: 'kube_deployment_spec_replicas{namespace="sentrix",deployment="conflict",job="a"}'
+                        values: '2+0x24'
+                      - series: 'kube_deployment_spec_replicas{namespace="sentrix",deployment="conflict",job="b"}'
+                        values: '1+0x24'
+                      - series: 'kube_pod_owner{namespace="sentrix",pod="p",owner_kind="ReplicaSet",owner_name="front-v",owner_is_controller="true"}'
+                        values: '1+0x24'
+                      - series: 'kube_replicaset_owner{namespace="sentrix",replicaset="front-v",owner_kind="Deployment",owner_name="frontend",owner_is_controller="true"}'
+                        values: '1+0x24'
+                      - series: 'container_cpu_usage_seconds_total{namespace="sentrix",pod="p",container="server"}'
+                        values: '0+2.5x24'
+                      - series: 'kube_pod_container_resource_limits{namespace="sentrix",pod="p",container="server",resource="cpu"}'
+                        values: '0.5+0x24'
+                      - series: 'container_cpu_cfs_throttled_periods_total{namespace="sentrix",pod="p",container="server"}'
+                        values: '0+2x24'
+                      - series: 'container_cpu_cfs_periods_total{namespace="sentrix",pod="p",container="server"}'
+                        values: '0+10x24'
+                    promql_expr_test:
+                """);
+        String frontend = "{deployment=\"frontend\"}";
+        yaml.append(check(MetricDefinition.available_replicas, "frontend", frontend, "0"));
+        yaml.append(check(MetricDefinition.desired_replicas, "frontend", frontend, "1"));
+        yaml.append(check(MetricDefinition.desired_replicas, "conflict", null, null));
+        yaml.append(check(MetricDefinition.cpu_limit_ratio, "frontend", frontend, "1"));
+        yaml.append(check(MetricDefinition.cpu_throttling_ratio, "frontend", frontend, "0.2"));
+        yaml.append(check(MetricDefinition.cpu_limit_ratio, "other", null, null));
+        yaml.append(check(MetricDefinition.cpu_throttling_ratio, "other", null, null));
         Path target = Path.of("target", "prometheus-query-tests.yaml");
         Files.createDirectories(target.getParent());
         Files.writeString(target, yaml);
-        assertEquals(7, MetricDefinition.values().length);
+        assertEquals(11, MetricDefinition.values().length);
         // The CI promtool step executes this generated fixture against the real query engine.
         assertTrue(Files.size(target) > 0);
     }
 
     private static String check(MetricDefinition metric, String service, String labels, String expected) {
-        String expression = metric.expression("sentrix", service);
+        String expression = metric.expression("sentrix", service, 30);
         // promtool compares NaN unequal to itself; assert its defining property instead.
         if (".nan".equals(expected)) {
             expression = "count((" + expression + ") != (" + expression + "))";

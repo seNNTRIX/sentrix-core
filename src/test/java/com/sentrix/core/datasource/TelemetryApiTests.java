@@ -216,6 +216,21 @@ class TelemetryApiTests {
     }
 
     @Test
+    void diagnosisMetricsKeepObservedZeroAndMissingSamplesDistinct() throws Exception {
+        for (var key : List.of("available_replicas", "desired_replicas", "cpu_limit_ratio", "cpu_throttling_ratio")) {
+            payload.set(envelope("matrix", series("deployment", "[[1700000000,\"0\"],[1700000060,\"1\"]]")));
+            mvc.perform(metric(key)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.unit").value(key.endsWith("replicas") ? "replicas" : "ratio"))
+                    .andExpect(jsonPath("$.dataStatus").value("PARTIAL"))
+                    .andExpect(jsonPath("$.points[0].value").value(0.0))
+                    .andExpect(jsonPath("$.points[1].value").isEmpty())
+                    .andExpect(jsonPath("$.points[2].value").value(1.0));
+        }
+        payload.set(envelope("matrix", series("deployment", "[[1700000000,\"0.5\"]]")));
+        mvc.perform(metric("available_replicas")).andExpect(status().isBadGateway());
+    }
+
+    @Test
     void supportsMetricCatalogWithNamespaceScopeAndUpstreamWarnings() throws Exception {
         for (String metric : List.of("cpu_usage_cores", "memory_working_set_bytes", "request_rate", "error_ratio",
                 "latency_p50_ms", "latency_p90_ms", "latency_p99_ms")) {

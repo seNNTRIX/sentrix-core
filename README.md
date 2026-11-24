@@ -206,6 +206,13 @@ curl -G http://127.0.0.1:8080/api/v1/environments/1/metrics \
 | `latency_p50_ms` | milliseconds | server span histogram의 p50 |
 | `latency_p90_ms` | milliseconds | server span histogram의 p90 |
 | `latency_p99_ms` | milliseconds | server span histogram의 p99 |
+| `available_replicas` | replicas | 선택한 Deployment의 가용 복제본 수 |
+| `desired_replicas` | replicas | 같은 Deployment의 목표 복제본 수 |
+| `cpu_limit_ratio` | ratio | Deployment CPU 사용 코어 수(15초 범위의 최근 두 counter 표본) ÷ CPU 한도. 1은 한도의 100% |
+| `cpu_throttling_ratio` | ratio | 15초간 CPU 실행을 제한한 CFS 주기의 증가율 ÷ 전체 CFS 주기의 증가율. 0.2는 주기 20% |
+
+복제본 수는 각 조회 시점에서 한 step 이내(최대 60초)에 관측한 값이다. 같은 시점의 수집본 값이 서로 다르거나 신선한 표본이 없으면 `null`을 반환한다. 목표가 1개인 서비스의 가용 복제본이 실제로 0이면 숫자 0을 반환한다. 두 CPU 비율은 서비스가 소유한 Pod의 컨테이너별 값을 합산한다. CPU counter의 마지막 원시 표본은 5초 이내여야 한다. 한도나 CFS 분모가 0이거나 관측되지 않으면 `null`이다. 초기 CPU 변화를 자세히 보려면 `stepSeconds=5`를 사용한다.
+
 
 `service`, `metric`, `from`, `to`는 필수입니다. 서비스는 Deployment 이름을 사용하고 `service_name`과 동일하다는 현재 수집 계약을 따릅니다. 기간은 **from 포함, to 제외**이며 ISO 8601 시각의 초 단위만 허용합니다. 최대 24시간, `stepSeconds` 기본 30·허용 5~3600, 최대 1440개 지점입니다. 초과하면 기간을 줄이거나 step을 늘려야 합니다. Rate 계산 창은 항상 1분이며 그래프 간격 또는 ML 학습 window와 별개입니다.
 

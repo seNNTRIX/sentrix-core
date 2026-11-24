@@ -46,10 +46,10 @@ class TelemetryController {
                 response.hasWarnings() ? List.of("UPSTREAM_WARNING") : List.of(), List.copyOf(services.values()));
     }
 
-    @Operation(summary="서비스 메트릭 시계열 조회", description="service, metric, from, to는 필수입니다. UTC ISO 8601 초 단위 시각, from 포함·to 제외, 최대 24시간입니다. stepSeconds는 5~3600(기본 30), 최대 1440개 지점입니다. 실제 0과 누락 null을 구분합니다. CPU는 cores, 메모리는 bytes, 오류율은 0~1 비율, 지연은 ms입니다. AVAILABLE은 서비스 정상 판정이 아닙니다.")
+    @Operation(summary="서비스 메트릭 시계열 조회", description="service, metric, from, to는 필수입니다. UTC ISO 8601 초 단위 시각, from 포함·to 제외, 최대 24시간입니다. stepSeconds는 5~3600(기본 30), 최대 1440개 지점입니다. 실제 0과 누락 null을 구분합니다. CPU는 cores, 메모리는 bytes, 오류율은 0~1 비율, 지연은 ms입니다. 가용·목표 복제본은 개수, CPU 한도 사용률과 CFS 제한 주기 비율은 분수입니다. AVAILABLE은 서비스 정상 판정이 아닙니다.")
     @GetMapping("/metrics")
     MetricSeries metrics(@PathVariable Long environmentId, @RequestParam String service,
-                         @Parameter(schema=@Schema(allowableValues={"cpu_usage_cores","memory_working_set_bytes","request_rate","error_ratio","latency_p50_ms","latency_p90_ms","latency_p99_ms"})) @RequestParam String metric, @RequestParam Instant from, @RequestParam Instant to,
+                         @Parameter(schema=@Schema(allowableValues={"cpu_usage_cores","memory_working_set_bytes","request_rate","error_ratio","latency_p50_ms","latency_p90_ms","latency_p99_ms","available_replicas","desired_replicas","cpu_limit_ratio","cpu_throttling_ratio"})) @RequestParam String metric, @RequestParam Instant from, @RequestParam Instant to,
                          @RequestParam(defaultValue = "30") int stepSeconds) {
         if (!NAME.matcher(service).matches()) throw badRequest("Invalid service name");
         var definition = MetricDefinition.parse(metric);
@@ -62,16 +62,14 @@ class TelemetryController {
         if (count > 1440) throw badRequest("At most 1440 points; increase stepSeconds or shorten the range");
         var connection = prometheus.connection(environmentId);
         Instant last = from.plusSeconds((count - 1) * stepSeconds);
-        var response = prometheus.query(connection, Map.of("query", definition.expression(connection.namespace(), service),
+        var response = prometheus.query(connection, Map.of("query", definition.expression(connection.namespace(), service, stepSeconds),
                 "start", from.toString(), "end", last.toString(), "step", String.valueOf(stepSeconds)), true);
         if (response.series().size() > 1) throw PrometheusClient.invalidResponse();
         var values = new HashMap<Instant, Double>();
         var warnings = new LinkedHashSet<String>();
         if (response.hasWarnings()) warnings.add("UPSTREAM_WARNING");
         for (JsonNode series : response.series()) {
-            String label = definition == MetricDefinition.cpu_usage_cores || definition == MetricDefinition.memory_working_set_bytes
-                    ? "deployment" : "service_name";
-            if (!service.equals(series.path("metric").path(label).asText()) || !series.path("values").isArray()) {
+            if (!service.equals(series.path("metric").path(definition.serviceLabel).asText()) || !series.path("values").isArray()) {
                 throw PrometheusClient.invalidResponse();
             }
             if (series.path("values").size() > count) throw PrometheusClient.invalidResponse();
@@ -82,6 +80,10 @@ class TelemetryController {
                         || (timestamp.getEpochSecond() - from.getEpochSecond()) % stepSeconds != 0
                         || values.containsKey(timestamp)) throw PrometheusClient.invalidResponse();
                 Double value = number(pair.get(1));
+                if (value != null && definition.unit.equals("replicas")
+                        && (value < 0 || value > Integer.MAX_VALUE || value != Math.rint(value))) {
+                    throw PrometheusClient.invalidResponse();
+                }
                 if (value == null) warnings.add("NON_FINITE_VALUES");
                 values.put(timestamp, value);
             }

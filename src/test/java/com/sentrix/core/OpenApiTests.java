@@ -61,7 +61,10 @@ class OpenApiTests {
         var metricParameter = metrics.path("parameters").valueStream()
                 .filter(p -> p.path("name").asText().equals("metric")).findFirst().orElseThrow();
         assertThat(metricParameter.path("required").asBoolean()).isTrue();
-        assertThat(metricParameter.path("schema").path("enum").size()).isEqualTo(7);
+        assertThat(metricParameter.path("schema").path("enum").valueStream().map(n -> n.asText()).toList())
+                .containsExactlyInAnyOrder("cpu_usage_cores", "memory_working_set_bytes", "request_rate", "error_ratio",
+                        "latency_p50_ms", "latency_p90_ms", "latency_p99_ms", "available_replicas", "desired_replicas",
+                        "cpu_limit_ratio", "cpu_throttling_ratio");
         assertThat(doc.path("components").path("schemas").path("CreateEnvironment").path("properties").has("namespace")).isTrue();
     }
 
