@@ -1,5 +1,6 @@
 package com.sentrix.core.analysis;
 
+import java.net.URI;
 import java.net.http.*;
 import java.nio.ByteBuffer;
 import java.time.Duration;
@@ -35,8 +36,23 @@ public class AnalysisModelClient {
         body.put("windowEnd", input.windowEnd().toString());
         body.put("featureSchemaVersion", input.featureSchemaVersion());
         body.put("modelVersion", input.modelVersion());
+        return parse(post(settings.endpoint(), body), input);
+    }
+
+    JsonNode logSemantics(long environmentId, String namespace, Instant end) {
+        if (settings.logSemanticsEndpoint() == null) throw new AnalysisFailure("MODEL_UNAVAILABLE");
+        var body = mapper.createObjectNode();
+        body.put("environmentId", environmentId);
+        body.put("namespace", namespace);
+        body.put("windowEnd", end.toString());
+        body.put("windowSeconds", 30);
+        var bytes = post(settings.logSemanticsEndpoint(), body);
+        return mapper.readerFor(JsonNode.class).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readValue(bytes);
+    }
+
+    private byte[] post(URI endpoint, JsonNode body) {
         var timeout = Duration.ofSeconds(settings.timeoutSeconds());
-        var request = HttpRequest.newBuilder(settings.endpoint()).timeout(timeout)
+        var request = HttpRequest.newBuilder(endpoint).timeout(timeout)
                 .header("Accept", "application/json").header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(body))).build();
         var client = HttpClient.newBuilder().connectTimeout(timeout).followRedirects(HttpClient.Redirect.NEVER).build();
@@ -46,7 +62,7 @@ public class AnalysisModelClient {
             var response = pending.get(settings.timeoutSeconds(), TimeUnit.SECONDS);
             if (response.statusCode() >= 300 && response.statusCode() < 400) throw new AnalysisFailure("MODEL_REDIRECT_REJECTED");
             if (response.statusCode() != 200) throw new AnalysisFailure("MODEL_HTTP_ERROR");
-            return parse(response.body(), input);
+            return response.body();
         } catch (TimeoutException ex) {
             throw new AnalysisFailure("MODEL_TIMEOUT");
         } catch (ExecutionException ex) {

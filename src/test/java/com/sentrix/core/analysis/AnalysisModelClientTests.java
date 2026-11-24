@@ -147,6 +147,18 @@ class AnalysisModelClientTests {
     }
 
     @Test
+    void logModelMayUseAnIndependentServerOrShareTheAnalysisServer() {
+        var separate = new AnalysisModelSettings(true, "http://127.0.0.1:8000", "v1", "v1", 10,
+                "http://127.0.0.1:18002/private");
+        assertEquals("http://127.0.0.1:8000/v1/analyses", separate.endpoint().toString());
+        assertEquals("http://127.0.0.1:18002/private/v1/log-semantics", separate.logSemanticsEndpoint().toString());
+        var shared = new AnalysisModelSettings(true, "http://localhost:8000/", "v1", "v1", 10);
+        assertEquals("http://localhost:8000/v1/log-semantics", shared.logSemanticsEndpoint().toString());
+        assertThrows(IllegalArgumentException.class, () -> new AnalysisModelSettings(true, "http://localhost", "v1", "v1",
+                10, "https://untrusted.invalid/path?access=token"));
+    }
+
+    @Test
     void disabledOrInvalidRequestNeverCallsServer() {
         var disabled = new AnalysisModelClient(settings(false, 1), mapper);
         assertEquals("MODEL_UNAVAILABLE", assertThrows(AnalysisModelClient.AnalysisFailure.class, () -> disabled.analyze(request)).code());

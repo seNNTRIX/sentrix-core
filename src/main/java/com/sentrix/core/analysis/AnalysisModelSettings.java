@@ -2,6 +2,7 @@ package com.sentrix.core.analysis;
 
 import java.net.URI;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Only server operators can select the model endpoint and version pair. */
@@ -9,26 +10,35 @@ import org.springframework.stereotype.Component;
 public class AnalysisModelSettings {
     private final boolean enabled;
     private final URI endpoint;
+    private final URI logSemanticsEndpoint;
     private final String modelVersion;
     private final String featureSchemaVersion;
     private final int timeoutSeconds;
 
+    AnalysisModelSettings(boolean enabled, String baseUrl, String modelVersion, String featureSchemaVersion, int timeoutSeconds) {
+        this(enabled, baseUrl, modelVersion, featureSchemaVersion, timeoutSeconds, "");
+    }
+
+    @Autowired
     public AnalysisModelSettings(@Value("${sentrix.analysis.enabled:false}") boolean enabled,
             @Value("${sentrix.analysis.base-url:}") String baseUrl,
             @Value("${sentrix.analysis.model-version:}") String modelVersion,
             @Value("${sentrix.analysis.feature-schema-version:}") String featureSchemaVersion,
-            @Value("${sentrix.analysis.timeout-seconds:10}") int timeoutSeconds) {
+            @Value("${sentrix.analysis.timeout-seconds:10}") int timeoutSeconds,
+            @Value("${sentrix.log-semantics.base-url:}") String logBaseUrl) {
         this.enabled = enabled;
         this.modelVersion = version(modelVersion);
         this.featureSchemaVersion = version(featureSchemaVersion);
         this.timeoutSeconds = timeoutSeconds;
         if (timeoutSeconds < 1 || timeoutSeconds > 60) throw invalid();
-        this.endpoint = endpoint(baseUrl);
+        this.endpoint = endpoint(baseUrl, "/v1/analyses");
+        this.logSemanticsEndpoint = endpoint(logBaseUrl.isEmpty() ? baseUrl : logBaseUrl, "/v1/log-semantics");
         if (enabled && (endpoint == null || this.modelVersion.isEmpty() || this.featureSchemaVersion.isEmpty())) throw invalid();
     }
 
     public boolean enabled() { return enabled; }
     public URI endpoint() { return endpoint; }
+    public URI logSemanticsEndpoint() { return logSemanticsEndpoint; }
     public String modelVersion() { return modelVersion; }
     public String featureSchemaVersion() { return featureSchemaVersion; }
     public int timeoutSeconds() { return timeoutSeconds; }
@@ -38,7 +48,7 @@ public class AnalysisModelSettings {
         return value;
     }
 
-    private static URI endpoint(String baseUrl) {
+    private static URI endpoint(String baseUrl, String pathSuffix) {
         if (baseUrl == null) throw invalid();
         if (baseUrl.isEmpty()) return null;
         try {
@@ -51,7 +61,7 @@ public class AnalysisModelSettings {
                     || java.util.Arrays.stream(path.split("/")).anyMatch(segment -> segment.equals(".") || segment.equals(".."))
                     || !uri.normalize().getRawPath().equals(path)) throw invalid();
             String base = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-            return URI.create(base + "/v1/analyses");
+            return URI.create(base + pathSuffix);
         } catch (IllegalArgumentException ex) {
             throw invalid();
         }

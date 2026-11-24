@@ -31,7 +31,9 @@ class OpenApiTests {
                 count++;
             }
         }
-        assertThat(count).isEqualTo(32);
+        assertThat(count).isEqualTo(34);
+        assertThat(paths.has("/api/v1/environments/{environmentId}/log-semantics")).isTrue();
+        assertThat(paths.has("/api/v1/environments/{environmentId}/log-semantics/summary")).isTrue();
         var rcaParameters = paths.path("/api/v1/environments/{environmentId}/incidents/{incidentId}/rca").path("get").path("parameters");
         var at = rcaParameters.valueStream().filter(p -> p.path("name").asText().equals("at")).findFirst().orElseThrow();
         assertThat(at.path("schema").path("enum").valueStream().map(n -> n.asText()).toList())

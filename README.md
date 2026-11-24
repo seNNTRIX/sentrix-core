@@ -556,3 +556,11 @@ JDK 21의 JAVA_HOME을 설정하고 로컬 MySQL·빌드된 대시보드·모델
 `GET /api/v1/environments/{environmentId}/overview`는 환경 전체의 열린 장애 수(openIncidents), 조회 시각(queriedAt), 최근 자동 분석 구간(recentWindows, 기본 12개, 선택적 limit 1~100개)를 반환한다. from과 to를 함께 보내면 해당 시간대와 겹치는 모든 구간을 반환하며 최대 범위는 24시간이다. 기간을 지정하면 limit은 적용하지 않는다. 각 구간의 locations는 모델이 반환한 모든 서비스·호출 경로 후보의 순위와 위치를 담으며 후보가 없으면 빈 배열이다. 수동·자동 열린 기록을 모두 센다. 관측 날짜가 지난 구간도 종료 시각을 그대로 표시한다. 서비스별 요청량·오류율·지연과 수집 신호 최신성은 각각 metrics와 collection-status API를 사용한다.
 
 Explore의 로그 발생량 API는 각 버킷의 전체 count와 함께 Loki의 detected_level 집계인 levels를 반환한다. 미관측 구간은 count=null이고 levels는 빈 객체다. 원문 없이도 레벨별 발생량을 그릴 수 있다. Trace 검색은 namedRoot(루트 이름 수집 여부 제한), minSpanMs(초과, 0~86400000), errorOnly, operation(정확히 일치) 조건을 선택적으로 받는다. 모두 같은 환경·서비스의 span에 적용하며 matchedSpans는 Tempo에서 해당 개수를 제공할 때만 반환한다.
+
+### 개요의 로그 의미 공간
+
+운영자 화면은 `GET /api/v1/environments/{id}/log-semantics`에서 모델이 정제한 문장과 지도를 읽는다. 공개 화면은 별도 주소 `GET /api/v1/environments/{id}/log-semantics/summary`를 사용한다. 이 주소는 문장 내용과 모델의 임의 진단 메시지를 응답에 담지 않는다. 전시 프록시에는 `/summary`만 허용한다.
+
+로그 모델을 별도 프로세스에 두면 `SENTRIX_LOG_SEMANTICS_BASE_URL`에 그 주소를 지정한다. 미설정이면 `SENTRIX_ANALYSIS_BASE_URL`을 사용한다.
+
+두 조회는 매 10초 경계에 끝나는 최근 30초를 대상으로 같은 환경의 모델 응답을 공유한다. 조회 범위와 namespace는 서버가 정한다. `baseline.start/end`는 운영자가 승인한 정상 비교 구간(Unix 초), `windowEnd`는 ISO 8601 UTC다. `novel`과 각 서비스의 `novelSentences/novelLines`는 전체 창의 집계이며, `points/baselinePoints`는 각각 최대 400개다. 가용하지 않은 경우 HTTP 200에 `status: UNAVAILABLE`과 사유 코드를 보낸다. 원인 순위와 환경 이상점수는 기존 분석 경로에서 계산한다.
